@@ -1,0 +1,26 @@
+Basic Ship loadouts from here.
+
+https://github.com/cmmcleod/coriolis-data/tree/master/dist/index.json
+
+https://github.com/cmmcleod/coriolis-data.git
+
+FDevIDs from here
+
+https://github.com/EDCD/FDevIDs
+
+
+Lots of stuff from EDMarketConnector
+Uses a modified version of the companion connector
+Quite a lot of the code is derivative!
+
+EDDN stuff from
+https://github.com/jamesremuscat/EDDN
+
+
+EDSM Nightly Dumps
+
+To initialise Universe and as a batch update
+https://www.edsm.net/nightly-dumps
+
+I think we probably just need
+https://www.edsm.net/dump/systemsWithCoordinates.json
