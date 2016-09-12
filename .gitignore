@@ -1,5 +1,14 @@
 *.pyc
 *.sqlite3
+cookies.txt
+log.txt
+README_VE.txt
+
+migrations/*.py
+modules/coriolis-data/
+modules/eddb-data/
+modules/EDMarketConnector
+modules/temp
 
 
 # From Git boilerplate

@@ -55,5 +55,5 @@ for k, v in pobj.ship.hardpoints.mount.items():
 # apisession = CompanionSession()
 # Note for testing the cookie is in root dir and has been
 # authenticated/verified though python shell
-# apisession.login('jonathanjstevens@gmail.com', 'XXXXXXX')
+# apisession.login('email', 'XXXXXXX')
 # pprint(apisession.fixup(apisession.query()))
