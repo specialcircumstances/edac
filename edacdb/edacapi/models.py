@@ -13,14 +13,14 @@ class CMDR(models.Model):
     version = models.CharField(max_length=32)
     credits = models.IntegerField(blank=True, default=0)
     loan = models.IntegerField(blank=True, default=0)
-    insuranceknown = models.BooleanField()
+    insuranceknown = models.BooleanField(blank=True, default=False)
     insurance = models.IntegerField(blank=True, default=0)
     gamemode = models.CharField(max_length=32, blank=True, default='')
     group = models.CharField(max_length=32, blank=True, default='')
     # TODO Location
     # Rank
-    rank_known = models.BooleanField()
-    rank_progress_known = models.BooleanField()
+    rank_known = models.BooleanField(blank=True, default=False)
+    rank_progress_known = models.BooleanField(blank=True, default=False)
     rank_combat = models.IntegerField(blank=True, default=0)
     rank_combat_progress = models.IntegerField(blank=True, default=0)
     rank_trade = models.IntegerField(blank=True, default=0)
@@ -157,6 +157,12 @@ class PowerState(models.Model):
     name = models.CharField(max_length=32, unique=True)
     # notes
 
+class Economy(models.Model):
+    # What we know about an economy
+    #
+    name = models.CharField(max_length=32, unique=True)
+    # notes
+
 
 class System(models.Model):
     # Have to allow for variations in data sources
@@ -172,7 +178,7 @@ class System(models.Model):
     eddbid = models.IntegerField(unique=True, blank=True, null=True)
     is_populated = models.NullBooleanField(blank=True, null=True) # Y N ?
     population = models.IntegerField(blank=True, null=True)
-    simbad_ref = models.CharField(max_length=64, blank=True, db_index=True, default='')
+    simbad_ref = models.CharField(max_length=96, blank=True, db_index=True, default='')
     needs_permit = models.NullBooleanField(blank=True, null=True) # Y N ?
     eddbdate = models.IntegerField(blank=True, null=True) # Why Integer???
     reserve_type = models.CharField(max_length=32, blank=True, default='')
@@ -200,3 +206,6 @@ class System(models.Model):
     # 'Theocracy': 88, 'Confederacy': 1410}
     power_state = models.ForeignKey(PowerState, models.SET_NULL, blank=True, null=True)
     # {'Control': 698, 'Exploited': 7531, 'Contested': 385}
+    primary_economy = models.ForeignKey(Economy, models.SET_NULL, blank=True, null=True)
+    #
+    duphash = models.CharField(max_length=64, blank=True, default='')

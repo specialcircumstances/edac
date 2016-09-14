@@ -10,6 +10,10 @@ import ijson
 import time
 import gc
 from os.path import isfile
+try:
+    from modules.edacdb_wrapper import EDACDB
+except:
+    from edacdb_wrapper import EDACDB
 
 # Many module globals
 
@@ -23,10 +27,6 @@ stationsfile = 'modules\eddb-data\stations.json'
 systemsfile = 'modules\eddb-data\systems.jsonl'
 populatedsystemsfile = 'modules\eddb-data\systems_populated.jsonl'
 
-DEBUG = True
-ERROR = True
-VERSION = '2.2 Beta'
-
 listings = {}
 listings_count = 0
 
@@ -37,12 +37,12 @@ VERSION = '2.2 Beta'
 
 def printdebug(mystring):
     if DEBUG is True:
-        print("DEBUG coriolis: %s" % mystring)
+        print("DEBUG eddb: %s" % mystring)
 
 
 def printerror(mystring):
     if ERROR is True:
-        print("ERROR coriolis: %s" % mystring)
+        print("ERROR eddb: %s" % mystring)
 
 
 
@@ -101,19 +101,13 @@ class Systems(object):
 
     There are about 2.5 million of them in the full JSON dump!
 
-    So we won't load them idly... (or easily as it turns out...)
-    The file is a single large json list with no CR, so normal json
-    loads fail. Have resorted to ijson.
-
-    Second issue is that it's just too much data for a simple dict, so the
-    only real choice is to push each record straight into our DB backend.
-
-    systemsfile = 'modules\eddb-data\systems.json'
+    Moved to using jsonl files as much easier to process.
+    systemsfile = 'modules\eddb-data\systems.jsonl'
     2439071 systems at last count, even adding items to a list results in
     over 2GB list. So as I was to remain 32-bit compatible, this cannot live
     in memory. I start to see problems at about 1.3 mil.
 
-    populatedsystemsfile = 'modules\eddb-data\systems_populated.json'
+    populatedsystemsfile = 'modules\eddb-data\systems_populated.jsonl'
     19436 systems at last count, which is much more managable.
 
     '''
@@ -146,43 +140,6 @@ class Systems(object):
             myobj = namedtuple('X', myobj.keys())(*myobj.values())
             return myobj
 
-    def old__init__(self, filepath=systemsfile):
-            #
-            self.systems = []
-            self.systems_count = 0
-            self.types = {}
-            # Well, we need to open the filepath
-            if isfile(filepath):
-                printdebug('%s found. Starting to load EDDB Systems data.' % filepath)
-                try:
-                    with open(filepath, 'r', encoding="utf8") as myfile:
-                            #filejson = json.load(myfile, encoding="utf8")
-                            #parser = ijson.parse(myfile)
-                            #for prefix, event, value in parser:
-                            #    print(prefix, event, value)
-                            items = ijson.items(myfile, 'item')
-                            for item in items:
-                                self.systems_count += 1
-                                self.lastsystem = item
-                                #if item['needs_permit'] == 1:
-                                #    print('\n%s' % item['name'])
-                                if item['power_state'] is not None:
-                                    #print('\n%s' % item['security'])]
-                                    if item['power_state'] in self.types.keys():
-                                        self.types[item['power_state']] += 1
-                                    else:
-                                        self.types[item['power_state']] = 0
-                                print('Read %d systems                     \r' % self.systems_count, end='')
-                                #self.systems.append(item)
-                            print('%d systems in file.' % self.systems_count)
-                    myfile.close
-                    #time.sleep(30)
-                    printdebug('Successfully loaded JSON: %s' % filepath)
-                    #self.systems_load_process()
-                    self.loaded = True  # TODO better checks here
-                except Exception as e:
-                    print('%d systems loaded at error' % self.systems_count)
-                    print(e)
 
     def __init__(self, filepath=systemsfile):
         # Well, we need to open the filepath
@@ -190,6 +147,21 @@ class Systems(object):
         self.systems_count = 0
         self.types = {}
         self.lastsystem = None
+        self.dbapi = EDACDB()
+        ''' Need to convert from
+        {'updated_at': 1460286842, 'government': 'Corporate', 'y': 28.53125,
+        'faction': '1 Hydrae Vision Solutions', 'simbad_ref': '1 Hydrae',
+        'id': 3, 'x': 60.90625, 'reserve_type': None, 'z': -54.90625,
+        'primary_economy': 'Agriculture', 'power_state': 'Exploited',
+        'is_populated': 1, 'edsm_id': 15225, 'security': 'High',
+        'power': 'Felicia Winters', 'name': '1 Hydrae', 'needs_permit': 0,
+        'allegiance': 'Independent', 'population': 6028981745, 'state': 'Boom'}
+        to
+        # [edsmid], [edsmdate], [name], [coord_x], [coord_y], [coord_z],
+        # [eddbid], [is_populated], [population], [simbad_ref], [needs_permit],
+        # [eddbdate], [reserve_type], [security], [state], [allegiance],
+        # [faction], [power], [government], [power_state]
+        '''
         if isfile(filepath):
             printdebug('%s found. Starting to load EDDB data.' % filepath)
             if True:
@@ -198,13 +170,21 @@ class Systems(object):
                     for line in myfile:
                         item = json.loads(line)
                         self.systems_count += 1
-                        self.systems[item['id']] = item
-                        if self.lastsystem is not None:
-                            self.systems.pop(self.lastsystem)
-                        self.lastsystem = item['id']
+                        # Tidy up fields to match DB
+                        item['eddbid'] = item.pop('id')
+                        item['eddbdate'] = item.pop('updated_at')
+                        item['coord_x'] = item.pop('x')
+                        item['coord_y'] = item.pop('y')
+                        item['coord_z'] = item.pop('z')
+                        item['edsmid'] = item.pop('edsm_id')
+                        if item['reserve_type'] is None:
+                            item['reserve_type']  = ''
+                        if item['simbad_ref'] is None:
+                            item['simbad_ref'] = ''
+                        self.dbapi.create_system_in_db(item)
                         print('Read %d systems                     \r' % self.systems_count, end='')
                     myfile.close
-                    gc.enable
+                    self.dbapi.create_system_bulk_flush()
                 printdebug('Successfully loaded JSON: %s' % filepath)
                 #self.data_load_process()
                 #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
