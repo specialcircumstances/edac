@@ -1,12 +1,21 @@
+import time
+
 from django.shortcuts import render
 from django.db import transaction
+from django.http import HttpResponse
+import json
+import cbor
+import sys
 
 from .models import CMDR, Ship, System
 from .models import ModuleSlot, HardpointMount
 from .models import SecurityLevel, Allegiance, State, Faction, Power
 from .models import Government, PowerState, Economy
-from rest_framework import viewsets
+from rest_framework import viewsets, views
 from rest_framework_bulk import BulkModelViewSet
+from rest_framework.response import Response
+from rest_framework.renderers import JSONRenderer
+from rest_framework.negotiation import BaseContentNegotiation
 from .serializers import CMDRSerializer, ShipSerializer, SystemSerializer
 from .serializers import ModuleSlotSerializer, HardpointMountSerializer
 from .serializers import SecurityLevelSerializer, AllegianceSerializer
@@ -64,13 +73,16 @@ class HardpointMountViewSet(viewsets.ModelViewSet):
     serializer_class = HardpointMountSerializer
 
 
-
 class SystemViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Systems to be viewed or edited.
     """
     queryset = System.objects.all()
     serializer_class = SystemSerializer
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super(SystemViewSet, self).create(self, request, *args, **kwargs)
 
 
 class SystemBulkViewSet(BulkModelViewSet):
@@ -81,13 +93,80 @@ class SystemBulkViewSet(BulkModelViewSet):
     serializer_class = SystemBulkSerializer
     # TODO control Bulk Deletes
 
+    # Make the whole create atomic
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        # return self.create(request, *args, **kwargs)
+        return super(SystemBulkViewSet, self).post(self, request, *args, **kwargs)
 
-class SystemIDViewSet(viewsets.ModelViewSet):
+
+class SystemIDViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API endpoint that allows Systems to be viewed or edited.
     """
-    queryset = System.objects.all()
+    queryset = System.objects.only('pk', 'edsmid', 'eddbid', 'duphash')
     serializer_class = SystemIDSerializer
+
+
+class IgnoreClientContentNegotiation(BaseContentNegotiation):
+    def select_parser(self, request, parsers):
+        """
+        Select the first parser in the `.parser_classes` list.
+        """
+        return parsers[0]
+
+    def select_renderer(self, request, renderers, format_suffix):
+        """
+        Select the first renderer in the `.renderer_classes` list.
+        """
+        return (renderers[0], renderers[0].media_type)
+
+
+class FastSysIDListView(views.APIView):
+    queryset = System.objects.all()
+    permission_classes = []
+    authentication_classes = []
+    renderer_classes = [JSONRenderer]
+    content_negotiation_class = IgnoreClientContentNegotiation
+
+    def get(self, request):
+        #systems = System.objects.only('pk', 'edsmid', 'eddbid', 'duphash')
+        items = System.objects.count()
+        print('There are %d items' % items)
+        step = 8000
+        offset = 0
+        systems = []
+        starttime = time.clock()
+        #while offset < items:
+        #    print(System.objects.values('pk', 'edsmid', 'eddbid', 'duphash')[offset:step])
+        #    offset += step
+        systems = System.objects.values('pk', 'edsmid', 'eddbid', 'duphash')
+        list_systems = [entry for entry in systems]
+        '''
+        squeezed = []
+        for mydict in list_systems:
+            newdict = {}
+            newdict['a'] = mydict['pk']
+            newdict['b'] = mydict['edsmid']
+            newdict['c'] = mydict['eddbid']
+            newdict['d'] = mydict['duphash']
+            squeezed.append(mydict)
+        '''
+        endtime = time.clock()
+        timetaken = endtime - starttime
+        print('%d systems in %d seconds' % (items, timetaken))
+        print(sys.getsizeof(list_systems))
+        #print(sys.getsizeof(squeezed))
+        #myjson = json.dumps(squeezed)
+        #print(sys.getsizeof(myjson))
+        starttime = time.clock()
+        mycbor = cbor.dumps(list_systems)
+        endtime = time.clock()
+        timetaken = endtime - starttime
+        print('%d systems in %d seconds' % (items, timetaken))
+        print(sys.getsizeof(mycbor))
+        # serializer = SystemIDSerializer(systems)
+        return HttpResponse(mycbor, content_type='application/cbor; charset=utf-8')
 
 
 class SecurityLevelViewSet(viewsets.ModelViewSet):

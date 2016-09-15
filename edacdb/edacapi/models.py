@@ -208,4 +208,4 @@ class System(models.Model):
     # {'Control': 698, 'Exploited': 7531, 'Contested': 385}
     primary_economy = models.ForeignKey(Economy, models.SET_NULL, blank=True, null=True)
     #
-    duphash = models.CharField(max_length=64, blank=True, default='')
+    duphash = models.CharField(max_length=8, blank=True, default='')

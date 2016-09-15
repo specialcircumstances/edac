@@ -13,9 +13,11 @@ to stop it using something else, like MySQL if you prefer.
 
 import coreapi      # Doesn't appear to like bulk uploads
 import slumber      # So I'll try slumber
+import cbor         # Reduces data massively.
 import hashlib
 import time
-from multiprocessing import Process, Queue
+import base64
+from multiprocessing import Process, Queue, JoinableQueue
 from coreapi.compat import b64encode
 from urllib import parse as parse
 
@@ -40,6 +42,180 @@ def printerror(mystring):
         print("ERROR edacdb_wrapper: %s" % mystring)
 
 
+class SystemBulkUpdateProcess(Process):
+    # Based on https://pymotw.com/2/multiprocessing/communication.html
+    def __init__(self, slumapi, task_queue, result_queue):
+        Process.__init__(self)
+        self.slumapi = slumapi
+        self.task_queue = task_queue
+        self.result_queue = result_queue
+        printdebug('Created System Bulk Update Process')
+
+    def run(self):
+        proc_name = self.name
+        printdebug('Starting run of %s' % proc_name)
+        while True:
+            next_task = self.task_queue.get()
+            if next_task is None:
+                # Poison pill means shutdown
+                printdebug('%s: Exiting' % proc_name)
+                self.task_queue.task_done()
+                self.result_queue.close()
+                break
+            # print('%s: %d' % (proc_name, len(next_task)))
+            result = self.slumapi.systems.post(next_task)
+            self.task_queue.task_done()
+            self.result_queue.put(result)
+        return
+
+
+class FactionBulkUpdateProcess(Process):
+    # Based on https://pymotw.com/2/multiprocessing/communication.html
+    ''' NOT CURRENTLY USED '''
+    def __init__(self, slumapi, task_queue, result_queue):
+        Process.__init__(self)
+        self.slumapi = slumapi
+        self.task_queue = task_queue
+        self.result_queue = result_queue
+        printdebug('Created Faction Bulk Update Process')
+
+    def run(self):
+        proc_name = self.name
+        printdebug('Starting run of %s' % proc_name)
+        while True:
+            next_task = self.task_queue.get()
+            if next_task is None:
+                # Poison pill means shutdown
+                printdebug('%s: Exiting' % proc_name)
+                self.task_queue.task_done()
+                self.result_queue.close()
+                break
+            # print('%s: %d' % (proc_name, len(next_task)))
+            result = self.slumapi.factions.post(next_task)
+            self.task_queue.task_done()
+            self.result_queue.put(result)
+        return
+
+
+class SystemIDImporter(Process):
+    # Based on https://pymotw.com/2/multiprocessing/communication.html
+    def __init__(self, client, schema, task_queue, result_queue):
+        Process.__init__(self)
+        self.client = client
+        self.schema = schema
+        self.task_queue = task_queue
+        self.result_queue = result_queue
+        printdebug('Created SystemIDImporter Process')
+
+    def run(self):
+        proc_name = self.name
+        printdebug('Starting run of %s' % proc_name)
+        while True:
+            next_task = self.task_queue.get()
+            if next_task is None:
+                # Poison pill means shutdown
+                printdebug('%s: Exiting' % proc_name)
+                self.task_queue.task_done()
+                self.result_queue.close()
+                break
+            # print('%s: %d' % (proc_name, len(next_task)))
+            # TODO this is a little susceptable to issues server side.
+            result = self.client.action(
+                                self.schema,
+                                [next_task['list'], 'list'],
+                                params={'limit': next_task['limit'],
+                                        'offset': next_task['offset']})
+            self.task_queue.task_done()
+            self.result_queue.put(result)
+        return
+
+
+class FactionCache(object):
+    # There are quite a lot of these, so this can slow down bulk system
+    # import, so add a bulk update method for Factions also.
+    # The thing to watch here is that the Faction must be loaded before
+    # the system...
+    ''' THIS IS NOT CURRENTLY USED BECAUSE I NEED THE ID to populate the
+    system records '''
+
+    def findoradd(self, item):
+        if item is None:
+                return None
+        if item == 'None':
+                return None
+        if item == '':
+                return None
+        if item in self.items.keys():
+            return self.items[item]
+        else:
+            myparams = {
+                'name': item
+            }
+            self.bulklist.append(myparams)
+            self.bulkcount += 1
+            if self.bulkcount > 256:
+                self.bulkqueue.put(self.bulklist)
+                self.bulklist = []
+                self.bulkcount = 0
+            # TODO update cache
+
+    def flushbulkupdate(self):
+        # Empties any queue and tells process to end.
+        # Can only be called once as it stops the process
+        # Must be called for a clean close.
+        self.bulkqueue.put(self.bulklist)
+        self.bulkqueue.put(None)
+        self.bulkqueue.close()
+        printdebug('closed bulkqueue')
+        self.bulkqueue.join()
+        printdebug('bulkqueue join complete')
+        while self.resultqueue.empty() is not True:
+            garbage = self.resultqueue.get()
+        for myid in range(0, self.bulkprocesses):
+            self.bulkprocess[myid].join()
+        printdebug('Flushed Faction Bulk Update Process.')
+
+    # As per the ItemCache, I could be cleverer with inheritence here
+    def refresh(self):
+        mylist = self.client.action(self.schema, [self.mylist, 'list'])
+        self.count = mylist['count']
+        limit = 10000
+        offset = 0
+        mydict = {}
+        while offset < self.count:
+            mylist = self.client.action(
+                                self.schema,
+                                [self.mylist, 'list'],
+                                params={'limit': limit, 'offset': offset})
+            if len(mylist) > 0:
+                for odict in mylist['results']:
+                    mydict[odict['name']] = odict['id']
+            offset += limit
+        self.items = mydict
+
+    def __init__(self, client, schema, slumapi, mylist):
+        printdebug('Loading Faction Cache')
+        self.client = client
+        self.schema = schema
+        self.mylist = mylist
+        self.refresh()
+        self.bulklist = []
+        self.bulkcount = 0
+        self.bulkthreads = 0
+        self.bulkqueue = JoinableQueue()
+        self.resultqueue = Queue()
+        self.bulkprocesses = 2
+        self.bulkprocess = {}
+        # Create processes
+        for myid in range(0, self.bulkprocesses):
+            self.bulkprocess[myid] = FactionBulkUpdateProcess(
+                                        self.slumapi,
+                                        self.bulkqueue,
+                                        self.resultqueue)
+            self.bulkprocess[myid].start()
+        #print(self.items)
+
+
 class SysIDCache(object):
 
     def addtocache(self, newsys):
@@ -55,30 +231,33 @@ class SysIDCache(object):
     def addtobulkupdate(self, newsys):
         self.bulklist.append(newsys)
         self.bulkcount += 1
-        if self.bulkcount > 512:
-            self.flushbulkupdate()
-
+        if self.bulkcount > 8000:
+            # This hands it to other process via queue
+            self.bulkqueue.put(self.bulklist)
+            self.bulklist = []
+            self.bulkcount = 0
+            while self.bulkqueue.qsize() > self.bulkprocesses:
+                # no point letting the queue get too big
+                # This blocks
+                time.sleep(0.1)
+            # TODO update cache
 
     def flushbulkupdate(self):
-        #print('Attempting Bulk Update')
-        #print(self.bulklist)
-        #newsysb = self.client.action(self.bulkschema,
-        #                            ['systems', 'create'],
-        #                            params=self.bulklist)
-        # Pass it to the queue
-        #self.slumapi.systems.post(self.bulklist)
+        # Empties any queue and tells process to end.
+        # Can only be called once as it stops the process
+        # Must be called for a clean close.
         self.bulkqueue.put(self.bulklist)
-        self.bulklist = []
-        self.bulkcount = 0
-        print(self.bulkqueue.qsize())
-        while self.bulkqueue.qsize() > 1:
-            time.sleep(1)
-        # TODO update cache
-
-    def flushbulkqueue(self, myqueue):
-        # Multiprocessing version
-        self.slumapi.systems.post(myqueue.get())
-
+        for myid in range(0, self.bulkprocesses):
+            self.bulkqueue.put(None)    # One for each process?
+        self.bulkqueue.close()
+        printdebug('closed bulkqueue')
+        self.bulkqueue.join()
+        printdebug('bulkqueue join complete')
+        while self.resultqueue.empty() is not True:
+            garbage = self.resultqueue.get()
+        for myid in range(0, self.bulkprocesses):
+            self.bulkprocess[myid].join()
+        printdebug('Flushed System Bulk Update Process.')
 
     def updateoradd(self, system):
         # system in good state
@@ -91,65 +270,174 @@ class SysIDCache(object):
                 if system['edsmid'] in self.edsm.keys():
                     dbid = self.edsm[system['edsmid']]
         if dbid is None:
-            # System not recognised by EDDB or EDSM id
-            # TODO add coordinate checks for NEW systems!
-            # So add system
-            #try:
-                #newsys = self.client.action(self.schema, ['systems', 'create'], params=system)
-                #self.addtocache(newsys)
             self.addtobulkupdate(system)
-            #except Exception as e:
-            #    print(str(e))
-            #    print(system)
+            return True
         else:
             # check if we need to update
             if self.duphash[dbid] != system['duphash']:
                 system['pk'] = dbid
-                try:
+                try:        # TODO make a bulk updater
                     newsys = self.client.action(self.schema, ['systems', 'update'], params=system)
                     self.addtocache(newsys)
                 except Exception as e:
                     print(str(e))
                     print(system)
+                return True
+            else:
+                return False
 
+    '''
+    Not required with CBOR method
+    def readsysidfromqueue(self):
+        mylist = self.idresultqueue.get()
+        if len(mylist) > 0:
+            for odict in mylist['results']:
+                # print(odict)
+                eddbid = odict['eddbid']
+                edsmid = odict['edsmid']
+                pk = odict['pk']
+                if eddbid is not None:
+                    self.eddb[eddbid] = pk
+                if edsmid is not None:
+                    self.edsm[edsmid] = pk
+                self.duphash[pk] = odict['duphash']
+                self.idsprocessed += 1
+                timenow = int(time.clock() - self.timestart)
+                srate = self.idsprocessed / timenow
+                print('Processed %d systems (%d/s).             \r'
+                      % (self.idsprocessed,
+                         srate),
+                      end='')
+    '''
 
     def refresh(self):
-        mylist = self.client.action(self.schema, [self.mylist, 'list'])
         '''
-        Gives us a
-        [OrderedDict([('id', 1), ('name', 'Low')]),
-        OrderedDict([('id', 2), ('name', 'Medium')]),
-        OrderedDict([('id', 3), ('name', 'HIgh')])]
-        I want something simpler
-        {'Low': 1, 'Medium': 2, 'HIgh': 3}
-        I just want to see IDs for names
+        This version of refresh (our data getter) uses slumber and
+        cbor to massively reduce the time it take to get a fresh copy
+        of the SysID cache.
         '''
+        printdebug('Requesting CBOR dump of System IDs')
+        mycbor = self.slumapi.cbor.systemids.get()
+        printdebug('Extracting data from CBOR dump')
+        mylist = cbor.loads(mycbor)
+        printdebug('Constructing dictionaries')
+        idsprocessed = 0
         self.eddb = {}  # Find by eddb
         self.edsm = {}  # Find by edsm
         self.duphash = {}   # Check if update required
         if len(mylist) > 0:
             for odict in mylist:
-                #print(odict)
-                if odict['eddbid'] is not None:
-                    self.eddb[odict['eddbid']] = odict['pk']
-                if odict['edsmid'] is not None:
-                    self.edsm[odict['edsmid']] = odict['pk']
-                self.duphash[odict['pk']] = odict['duphash']
+                # print(odict)
+                eddbid = odict['eddbid']
+                edsmid = odict['edsmid']
+                pk = odict['pk']
+                if eddbid is not None:
+                    self.eddb[eddbid] = pk
+                if edsmid is not None:
+                    self.edsm[edsmid] = pk
+                self.duphash[pk] = odict['duphash']
+                idsprocessed += 1
+                timenow = int(time.clock() - self.timestart)
+                srate = idsprocessed / timenow
+                print('Processed %d systems (%d/s).             \r'
+                      % (idsprocessed,
+                         srate),
+                      end='')
+        self.sysidcount = idsprocessed
+
+
+
+    '''
+    Old version - too hard to use JSON  - too slow
+    was all getting too complex...
+
+    def refresh(self):
+        mylist = self.client.action(self.schema, [self.mylist, 'list'])
+        self.count = mylist['count']
+        limit = 8000  # Number of records to try and get at once
+        offset = 0
+        self.idsprocessed = 0
+        self.eddb = {}  # Find by eddb
+        self.edsm = {}  # Find by edsm
+        self.duphash = {}   # Check if update required
+        # multiprocessing stuff
+        self.idqueue = JoinableQueue()
+        self.idresultqueue = Queue()
+        self.idprocesses = 8
+        self.idprocess = {}
+        # Create processes
+        for myid in range(0, self.idprocesses):
+            self.idprocess[myid] = SystemIDImporter(
+                                    self.client,
+                                    self.schema,
+                                    self.idqueue,
+                                    self.idresultqueue)
+            self.idprocess[myid].start()
+        # Queue up request parameters
+        while offset < self.count:
+            task = {
+                'list': self.mylist,
+                'limit': limit,
+                'offset': offset
+            }
+            self.idqueue.put(task)
+            offset += limit
+        # Create some poisoned pills
+        for myid in range(0, self.idprocesses):
+            self.idqueue.put(None)    # One for each process?
+        self.idqueue.close()    # I won't write anymore
+        # Now we wait for the processes to complete
+        processesalive = True
+        while processesalive is True:
+            processesalive = False
+            # See if any processes are still alive
+            for myid in range(0, self.idprocesses):
+                if self.idprocess[myid].is_alive():
+                    processesalive = True
+                    #printdebug('%d still alive' % myid)
+            # dequeue and process results (may as well)
+            if self.idresultqueue.empty() is not True:
+                self.readsysidfromqueue()        # Process as we go
+        while self.idresultqueue.empty() is not True:
+            self.readsysidfromqueue()            # And the rest
+        #
+        printdebug('Waiting for all SysID retrievers to exit.')
+        for myid in range(0, self.idprocesses):
+            printdebug('Waiting for join: %d' % myid)
+            self.idprocess[myid].join()      # One for each process?
+        self.idresultqueue.close()
+        self.idresultqueue.join_thread()
+        self.idqueue.join()
+        seconds = int(time.clock() - self.timestart)
+        srate = self.idsprocessed / seconds
+        printdebug('SysID Cache loaded (%d/s). Finally...' % srate)
+    '''
+
 
 
     def __init__(self, client, schema, slumapi, mylist):
-        printdebug('Loading SysID Cache')
+        printdebug('Loading SysID Cache - this can take some time...')
         self.client = client
         self.schema = schema
         self.slumapi = slumapi
         self.mylist = mylist
+        self.sysidcount = 0
         self.bulklist = []
         self.bulkcount = 0
         self.bulkthreads = 0
+        self.timestart = time.clock()
         self.refresh()
-        self.bulkqueue = Queue()
-        self.bulkprocess = Process(target=self.flushbulkqueue, args=(self.bulkqueue,))
-        self.bulkprocess.start()
+        self.bulkqueue = JoinableQueue()
+        self.resultqueue = Queue()
+        self.bulkprocesses = 4
+        self.bulkprocess = {}
+        # Create processes
+        for myid in range(0, self.bulkprocesses):
+            self.bulkprocess[myid] = SystemBulkUpdateProcess(
+                                        self.slumapi,
+                                        self.bulkqueue,
+                                        self.resultqueue)
+            self.bulkprocess[myid].start()
         #print(self.items)
 
 
@@ -186,6 +474,9 @@ class ItemCache(object):
 
     def refresh(self):
         mylist = self.client.action(self.schema, [self.mylist, 'list'])
+        self.count = mylist['count']
+        limit = 10000
+        offset = 0
         '''
         Gives us a
         [OrderedDict([('id', 1), ('name', 'Low')]),
@@ -196,9 +487,15 @@ class ItemCache(object):
         I just want to see IDs for names
         '''
         mydict = {}
-        if len(mylist) > 0:
-            for odict in mylist:
-                mydict[odict['name']] = odict['id']
+        while offset < self.count:
+            mylist = self.client.action(
+                                self.schema,
+                                [self.mylist, 'list'],
+                                params={'limit': limit, 'offset': offset})
+            if len(mylist) > 0:
+                for odict in mylist['results']:
+                    mydict[odict['name']] = odict['id']
+            offset += limit
         self.items = mydict
 
     def __init__(self, client, schema, mylist):
@@ -237,7 +534,13 @@ class EDACDB(object):
     def duphash(self, data):
         data = str(data).encode('utf-8')
         #print(data)
-        return hashlib.md5(data).hexdigest()
+        dig = hashlib.md5(data).digest()  # b']A@*\xbcK*v\xb9q\x9d\x91\x10\x17\xc5\x92'
+        b64 = base64.b64encode(dig)       # b'XUFAKrxLKna5cZ2REBfFkg=='
+        return b64.decode()[0:8]          # JSON doesn't like bytes it seems
+                                          # XUFAKrxLKna5cZ2REBfFkg==
+        #return hashlib.md5(data).digest().encode("base64")
+        #return hashlib.md5(data).hexdigest()[0:15]
+        #b'iMjj8tMyETkJqEszZ-dZJQ=='
 
     def create_system_in_db(self, system):
         # System is Dict
@@ -263,8 +566,11 @@ class EDACDB(object):
             hashdata += str(system[key])
         system['duphash'] = self.duphash(hashdata)
         #print(system['hash'])
-        self.cache.systemids.updateoradd(system)
+        # return True if updated or added, else False
+        return self.cache.systemids.updateoradd(system)
 
+    def factionpreload(self, faction):
+        self.cache.factions.findoradd(faction)
 
     def __init__(
             self,
@@ -288,9 +594,9 @@ class EDACDB(object):
         self.bulkschema = self.client.get(self.bulkapi)
         # Slumber Test
         self.slumapi = slumber.API(bulkapi, auth=(username, password))
-        self.cache = DBCache(self.client, self.schema, self.slumapi)
         print(self.schema)  # Ordered Dict of objects
         print(self.bulkschema)
+        self.cache = DBCache(self.client, self.schema, self.slumapi)
         # e.g.
         # OrderedDict([
         #    ('cmdrs', 'http://127.0.0.1:8000/edacapi/cmdrs/'),

@@ -24,7 +24,7 @@ commodiesfile = 'modules\eddb-data\commodies.json'
 listingsfile = 'modules\eddb-data\listings.csv'
 modulesfile = 'modules\eddb-data\modules.json'
 stationsfile = 'modules\eddb-data\stations.json'
-systemsfile = 'modules\eddb-data\systems.jsonl'
+systemsfile = 'modules\eddb-data\systemsb.jsonl'
 populatedsystemsfile = 'modules\eddb-data\systems_populated.jsonl'
 
 listings = {}
@@ -145,6 +145,7 @@ class Systems(object):
         # Well, we need to open the filepath
         self.systems = {}
         self.systems_count = 0
+        self.systems_changed = 0
         self.types = {}
         self.lastsystem = None
         self.dbapi = EDACDB()
@@ -162,11 +163,33 @@ class Systems(object):
         # [eddbdate], [reserve_type], [security], [state], [allegiance],
         # [faction], [power], [government], [power_state]
         '''
+        self.factioncount = 0
+        if isfile(populatedsystemsfile):
+            printdebug('%s found.' % populatedsystemsfile)
+            printdebug('Preloading Factions.... can take a minute or two')
+            self.timestart = time.clock()
+            if True:
+                with open(populatedsystemsfile, 'r', encoding='utf-8') as myfile:
+                    for line in myfile:
+                        item = json.loads(line)
+                        self.systems_count += 1
+                        if item['faction'] is not None:
+                            self.dbapi.factionpreload(item['faction'])
+                            self.factioncount += 1
+                        print('Read %d systems, found %d Factions              \r' %
+                                (self.systems_count, self.factioncount),
+                                end='')
+                myfile.close
+            printdebug('Read %d populated systems, saw %d factions.' %
+                  (self.systems_count, self.factioncount)
+                  )
+        # OK, now bulk system updates will be usable (mostly)
+        self.systems_count = 0
         if isfile(filepath):
             printdebug('%s found. Starting to load EDDB data.' % filepath)
+            self.timestart = time.clock()
             if True:
                 with open(filepath, 'r', encoding='utf-8') as myfile:
-                    gc.disable
                     for line in myfile:
                         item = json.loads(line)
                         self.systems_count += 1
@@ -181,10 +204,19 @@ class Systems(object):
                             item['reserve_type']  = ''
                         if item['simbad_ref'] is None:
                             item['simbad_ref'] = ''
-                        self.dbapi.create_system_in_db(item)
-                        print('Read %d systems                     \r' % self.systems_count, end='')
+                        if self.dbapi.create_system_in_db(item) is True:
+                            self.systems_changed += 1
+                        seconds = int(time.clock() - self.timestart)
+                        srate = (self.systems_count + 1) / (seconds + 1)
+                        crate = (self.systems_changed + 1) / (seconds + 1)
+                        print('Read %d systems (%d/s), changed %d(%d/s)              \r' % (
+                                self.systems_count, srate,
+                                self.systems_changed, crate),
+                                end='')
                     myfile.close
                     self.dbapi.create_system_bulk_flush()
+                print('Read %d systems, changed %d.' % (
+                        self.systems_count, self.systems_changed))
                 printdebug('Successfully loaded JSON: %s' % filepath)
                 #self.data_load_process()
                 #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])

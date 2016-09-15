@@ -79,10 +79,22 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
-        'ATOMIC_REQUSTS': True,
+#        'ATOMIC_REQUESTS': True,
     }
 }
 
+# Seen a few issues with the cache
+#CACHES = {
+#    'default': {
+#        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+#        'LOCATION': 'unique-snowflake',
+#        'TIMEOUT': 7200,
+#    }
+#}
+#
+#CACHE_MIDDLEWARE_ALIAS = 'default'
+#CACHE_MIDDLEWARE_SECONDS = 7200
+#CACHE_MIDDLEWARE_KEY_PREFIX = ''
 
 # Password validation
 # https://docs.djangoproject.com/en/1.10/ref/settings/#auth-password-validators
@@ -106,8 +118,10 @@ REST_FRAMEWORK = {
     # Use Django's standard `django.contrib.auth` permissions,
     # or allow read-only access for unauthenticated users.
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly'
-    ]
+        'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
+    'PAGE_SIZE': 100
 }
 
 # Internationalization
