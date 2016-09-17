@@ -180,6 +180,7 @@ class Systems(object):
                                 (self.systems_count, self.factioncount),
                                 end='')
                 myfile.close
+                self.dbapi.factionpreload_flush()
             printdebug('Read %d populated systems, saw %d factions.' %
                   (self.systems_count, self.factioncount)
                   )

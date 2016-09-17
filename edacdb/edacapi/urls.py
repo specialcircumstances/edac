@@ -23,6 +23,8 @@ router.register(r'powerstates', views.PowerStatesViewSet)
 router.register(r'economies', views.EconomyViewSet)
 bulkrouter = BulkRouter(schema_title='EDACD API Bulk Schema', schema_url='./bulk/')
 bulkrouter.register(r'systems', views.SystemBulkViewSet, 'bulksys')
+bulkrouter.register(r'factions', views.FactionBulkViewSet, 'bulkfact')
+
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.
@@ -30,5 +32,6 @@ urlpatterns = [
     url(r'^', include(router.urls)),
     url(r'^bulk/', include(bulkrouter.urls)),
     url(r'^bulk/cbor/systemids/', views.FastSysIDListView.as_view()),
+    url(r'^bulk/cbor/cborsystemids/', views.CBORSysIDListView.as_view()),
     url(r'^api-auth/', include('rest_framework.urls', namespace='rest_framework'))
 ]

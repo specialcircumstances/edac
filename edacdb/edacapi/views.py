@@ -3,8 +3,9 @@ import time
 from django.shortcuts import render
 from django.db import transaction
 from django.http import HttpResponse
+from django.forms.models import model_to_dict
 import json
-import cbor
+import cbor2 as cbor
 import sys
 
 from .models import CMDR, Ship, System
@@ -16,13 +17,15 @@ from rest_framework_bulk import BulkModelViewSet
 from rest_framework.response import Response
 from rest_framework.renderers import JSONRenderer
 from rest_framework.negotiation import BaseContentNegotiation
+from rest_framework_cbor.renderers import CBORRenderer
+from rest_framework_cbor.parsers import CBORParser
 from .serializers import CMDRSerializer, ShipSerializer, SystemSerializer
 from .serializers import ModuleSlotSerializer, HardpointMountSerializer
 from .serializers import SecurityLevelSerializer, AllegianceSerializer
 from .serializers import StateSerializer, FactionSerializer, PowerSerializer
 from .serializers import GovernmentSerializer, PowerStateSerializer
 from .serializers import EconomySerializer, SystemIDSerializer
-from .serializers import SystemBulkSerializer
+from .serializers import SystemBulkSerializer, FactionBulkSerializer
 
 
 
@@ -122,6 +125,38 @@ class IgnoreClientContentNegotiation(BaseContentNegotiation):
         return (renderers[0], renderers[0].media_type)
 
 
+class CBORSysIDListView(views.APIView):
+    """
+    A view that returns the count of active users in JSON.
+    """
+    queryset = System.objects.all()
+    renderer_classes = (CBORRenderer, )
+    content_negotiation_class = IgnoreClientContentNegotiation
+
+    def get(self, request, format=None):
+        starttime = time.time()
+        systems = System.objects.values('pk', 'edsmid', 'eddbid', 'duphash')
+        print(sys.getsizeof(systems))
+        #print(len(systems))
+        endtime = time.time()
+        timetaken = endtime - starttime
+        print('Got systems in %d seconds' % (timetaken))
+        # optimise by changing to a long list.
+        list_systems = []
+        if len(systems) > 0:
+            list_headers = [header for header in sorted(systems[0].keys())]
+            list_systems = [
+                            [entry[header] for header in list_headers]
+                             for entry in systems]
+            list_systems = [len(list_headers)] + list_headers + list_systems
+            print(list_systems[0])
+        endtime = time.time()
+        timetaken = endtime - starttime
+        print('Change to list of dicts in %d seconds' % (timetaken))
+        print(sys.getsizeof(list_systems))
+        return Response(list_systems, content_type='application/cbor')
+
+
 class FastSysIDListView(views.APIView):
     queryset = System.objects.all()
     permission_classes = []
@@ -199,6 +234,21 @@ class FactionViewSet(viewsets.ModelViewSet):
     """
     queryset = Faction.objects.all()
     serializer_class = FactionSerializer
+
+
+class FactionBulkViewSet(BulkModelViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = Faction.objects.all()
+    serializer_class = FactionBulkSerializer
+    # TODO control Bulk Deletes
+
+    # Make the whole create atomic
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        # return self.create(request, *args, **kwargs)
+        return super(FactionBulkViewSet, self).post(self, request, *args, **kwargs)
 
 
 class PowerViewSet(viewsets.ModelViewSet):

@@ -63,6 +63,12 @@ class FactionSerializer(serializers.ModelSerializer):
         model = Faction
 
 
+class FactionBulkSerializer(BulkSerializerMixin, serializers.ModelSerializer):
+    class Meta:
+        model = Faction
+        list_serializer_class = BulkListSerializer
+
+
 class PowerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Power

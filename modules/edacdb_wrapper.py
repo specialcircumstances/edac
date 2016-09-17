@@ -13,10 +13,11 @@ to stop it using something else, like MySQL if you prefer.
 
 import coreapi      # Doesn't appear to like bulk uploads
 import slumber      # So I'll try slumber
-import cbor         # Reduces data massively.
+import cbor2 as cbor        # Reduces data massively.
 import hashlib
 import time
 import base64
+import sys
 from multiprocessing import Process, Queue, JoinableQueue
 from coreapi.compat import b64encode
 from urllib import parse as parse
@@ -24,6 +25,7 @@ from urllib import parse as parse
 # Just using django runserver at the moment
 default_dbapi = 'http://127.0.0.1:8000/edacapi/'
 default_bulkapi = 'http://127.0.0.1:8000/edacapi/bulk/'
+default_cborapi = 'http://127.0.0.1:8000/edacapi/bulk/cbor'
 default_username = 'root'
 default_password = 'password1234'
 
@@ -40,6 +42,7 @@ def printdebug(mystring):
 def printerror(mystring):
     if ERROR is True:
         print("ERROR edacdb_wrapper: %s" % mystring)
+
 
 
 class SystemBulkUpdateProcess(Process):
@@ -158,19 +161,21 @@ class FactionCache(object):
                 self.bulklist = []
                 self.bulkcount = 0
             # TODO update cache
+            self.items[item] = 0   # Means I know it but not really
 
     def flushbulkupdate(self):
         # Empties any queue and tells process to end.
         # Can only be called once as it stops the process
         # Must be called for a clean close.
         self.bulkqueue.put(self.bulklist)
-        self.bulkqueue.put(None)
+        for myid in range(0, self.bulkprocesses):
+            self.bulkqueue.put(None)
         self.bulkqueue.close()
-        printdebug('closed bulkqueue')
+        printdebug('FactionCache: Queuing complete. Waiting for DB commit.')
         self.bulkqueue.join()
-        printdebug('bulkqueue join complete')
         while self.resultqueue.empty() is not True:
             garbage = self.resultqueue.get()
+        printdebug('FactionCache: DB committed.')
         for myid in range(0, self.bulkprocesses):
             self.bulkprocess[myid].join()
         printdebug('Flushed Faction Bulk Update Process.')
@@ -198,6 +203,7 @@ class FactionCache(object):
         self.client = client
         self.schema = schema
         self.mylist = mylist
+        self.slumapi = slumapi
         self.refresh()
         self.bulklist = []
         self.bulkcount = 0
@@ -317,14 +323,24 @@ class SysIDCache(object):
         of the SysID cache.
         '''
         printdebug('Requesting CBOR dump of System IDs')
-        mycbor = self.slumapi.cbor.systemids.get()
-        printdebug('Extracting data from CBOR dump')
-        mylist = cbor.loads(mycbor)
-        printdebug('Constructing dictionaries')
+        packedlist = self.cborapi.cborsystemids.get()
+        printdebug('Reconstituting data structure')
+        # Reconstruct the data
+        mylist = []
+        if len(packedlist) > 0:
+            cols = packedlist[0]
+            heads = packedlist[1:cols+1]
+            mylist = [
+                        {heads[il]:ol[il] for il in range(0, cols)}
+                        for ol in packedlist[cols+1:]
+                        ]
+            # Done
+        printdebug('Constructing lookup dicts')
         idsprocessed = 0
         self.eddb = {}  # Find by eddb
         self.edsm = {}  # Find by edsm
         self.duphash = {}   # Check if update required
+        self.timestart = time.time()
         if len(mylist) > 0:
             for odict in mylist:
                 # print(odict)
@@ -337,8 +353,8 @@ class SysIDCache(object):
                     self.edsm[edsmid] = pk
                 self.duphash[pk] = odict['duphash']
                 idsprocessed += 1
-                timenow = int(time.clock() - self.timestart)
-                srate = idsprocessed / timenow
+                timenow = int(time.time() - self.timestart)
+                srate = (idsprocessed + 1) / (timenow + 1)
                 print('Processed %d systems (%d/s).             \r'
                       % (idsprocessed,
                          srate),
@@ -415,11 +431,12 @@ class SysIDCache(object):
 
 
 
-    def __init__(self, client, schema, slumapi, mylist):
+    def __init__(self, client, schema, slumapi, cborapi, mylist):
         printdebug('Loading SysID Cache - this can take some time...')
         self.client = client
         self.schema = schema
         self.slumapi = slumapi
+        self.cborapi = cborapi
         self.mylist = mylist
         self.sysidcount = 0
         self.bulklist = []
@@ -510,8 +527,8 @@ class ItemCache(object):
 class DBCache(object):
     # improve system import time
 
-    def __init__(self, client, schema, slumapi):
-        self.systemids = SysIDCache(client, schema, slumapi, 'systemids')
+    def __init__(self, client, schema, slumapi, cborapi):
+        self.systemids = SysIDCache(client, schema, slumapi, cborapi, 'systemids')
         self.securitylevels = ItemCache(client, schema, 'securitylevels')
         self.allegiances = ItemCache(client, schema, 'allegiances')
         self.sysstates = ItemCache(client, schema, 'sysstates')
@@ -520,6 +537,7 @@ class DBCache(object):
         self.powerstates = ItemCache(client, schema, 'powerstates')
         self.governments = ItemCache(client, schema, 'governments')
         self.economies = ItemCache(client, schema, 'economies')
+        self.bulkfactions = FactionCache(client, schema, slumapi, 'factions')
 
 
 class EDACDB(object):
@@ -570,12 +588,18 @@ class EDACDB(object):
         return self.cache.systemids.updateoradd(system)
 
     def factionpreload(self, faction):
-        self.cache.factions.findoradd(faction)
+        self.cache.bulkfactions.findoradd(faction)
+
+    def factionpreload_flush(self):
+        self.cache.bulkfactions.flushbulkupdate()
+        # temp
+        self.cache.factions.refresh()
 
     def __init__(
             self,
             dbapi=default_dbapi,
             bulkapi=default_bulkapi,
+            cborurl=default_cborapi,
             username=default_username,
             password=default_password
             ):
@@ -590,13 +614,18 @@ class EDACDB(object):
         self.client = coreapi.Client(transports=[http_transport])
         self.dbapi = dbapi
         self.bulkapi = bulkapi
+        self.cborurl = cborurl
         self.schema = self.client.get(self.dbapi)
         self.bulkschema = self.client.get(self.bulkapi)
         # Slumber Test
         self.slumapi = slumber.API(bulkapi, auth=(username, password))
+
+        self.cborapi = slumber.API(cborurl,
+                                   auth=(username, password)
+                                  )
         print(self.schema)  # Ordered Dict of objects
         print(self.bulkschema)
-        self.cache = DBCache(self.client, self.schema, self.slumapi)
+        self.cache = DBCache(self.client, self.schema, self.slumapi, self.cborapi)
         # e.g.
         # OrderedDict([
         #    ('cmdrs', 'http://127.0.0.1:8000/edacapi/cmdrs/'),
