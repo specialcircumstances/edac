@@ -26,6 +26,8 @@ from .serializers import StateSerializer, FactionSerializer, PowerSerializer
 from .serializers import GovernmentSerializer, PowerStateSerializer
 from .serializers import EconomySerializer, SystemIDSerializer
 from .serializers import SystemBulkSerializer, FactionBulkSerializer
+from .serializers import SystemSerpySerializer, MyBulkSystemSerializer
+
 
 
 
@@ -83,7 +85,6 @@ class SystemViewSet(viewsets.ModelViewSet):
     queryset = System.objects.all()
     serializer_class = SystemSerializer
 
-    @transaction.atomic
     def create(self, request, *args, **kwargs):
         return super(SystemViewSet, self).create(self, request, *args, **kwargs)
 
@@ -93,14 +94,83 @@ class SystemBulkViewSet(BulkModelViewSet):
     API endpoint that allows Systems to be bulk viewed or edited.
     """
     queryset = System.objects.all()
-    serializer_class = SystemBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    serializer_class = SystemSerpySerializer
     # TODO control Bulk Deletes
 
     # Make the whole create atomic
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
+    # @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        # print(request.content_type)
         # return self.create(request, *args, **kwargs)
-        return super(SystemBulkViewSet, self).post(self, request, *args, **kwargs)
+        return super(SystemBulkViewSet, self).create(request, *args, **kwargs)
+
+
+class SerpySystemBulkViewSet(views.APIView):
+
+    """
+    API endpoint that allows Systems to be bulk viewed or edited.
+    """
+    queryset = System.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    serializer_class = MyBulkSystemSerializer
+    # TODO control Bulk Deletes
+
+    # Stripped down for initial load events
+
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        # If we assume the data is good...
+        # because we already checked it in EDACAPI Wrapper
+        # It's a list of dict object - should be directly insertable in the DB
+        # We just need to find the related objects and put them in the dict
+        # print('Looking up related objects')
+        # Load the related tables in full as there are 8000+ objects in dict
+        bool(SecurityLevel.objects.all())
+        bool(State.objects.all())
+        bool(Allegiance.objects.all())
+        bool(Faction.objects.all())
+        bool(Power.objects.all())
+        bool(Government.objects.all())
+        bool(PowerState.objects.all())
+        bool(Economy.objects.all())
+        #
+        # All wrapped in a try because there could be issues outside of our
+        # control doing this...
+        try:
+            for thisdict in request.data:
+                if thisdict['security'] is not None:
+                    thisdict['security'] = SecurityLevel.objects.get(pk=thisdict['security'])
+                if thisdict['state'] is not None:
+                    thisdict['state'] = State.objects.get(pk=thisdict['state'])
+                if thisdict['allegiance'] is not None:
+                    thisdict['allegiance'] = Allegiance.objects.get(pk=thisdict['allegiance'])
+                if thisdict['faction'] is not None:
+                    thisdict['faction'] = Faction.objects.get(pk=thisdict['faction'])
+                if thisdict['power'] is not None:
+                    thisdict['power'] = Power.objects.get(pk=thisdict['power'])
+                if thisdict['government'] is not None:
+                    thisdict['government'] = Government.objects.get(pk=thisdict['government'])
+                if thisdict['power_state'] is not None:
+                    thisdict['power_state'] = PowerState.objects.get(pk=thisdict['power_state'])
+                if thisdict['primary_economy'] is not None:
+                    thisdict['primary_economy'] = Economy.objects.get(pk=thisdict['primary_economy'])
+        except Exception as exc:
+            print(exc)
+            return Response(exc, status=status.HTTP_400_BAD_REQUEST)
+        # print('Doing Bulk Save')
+        try:
+            System.objects.bulk_create([System(**thisdict) for thisdict in request.data])
+        except:
+            print(exc)
+            return Response(exc, status=status.HTTP_400_BAD_REQUEST)
+        # print('Returning Response')
+        # Should really put some stuff in here.
+        return Response()
 
 
 class SystemIDViewSet(viewsets.ReadOnlyModelViewSet):
@@ -131,7 +201,8 @@ class CBORSysIDListView(views.APIView):
     """
     queryset = System.objects.all()
     renderer_classes = (CBORRenderer, )
-    content_negotiation_class = IgnoreClientContentNegotiation
+    parser_classes = (CBORParser, )
+    # content_negotiation_class = IgnoreClientContentNegotiation
 
     def get(self, request, format=None):
         starttime = time.time()
@@ -242,6 +313,8 @@ class FactionBulkViewSet(BulkModelViewSet):
     """
     queryset = Faction.objects.all()
     serializer_class = FactionBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
 
     # Make the whole create atomic

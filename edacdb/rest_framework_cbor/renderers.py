@@ -45,10 +45,10 @@ class CBORRenderer(BaseRenderer):
         """
         if data is None:
             return ''
-        print('Start CBOR')
-        print(sys.getsizeof(data))
+        # print('START CBOR RENDER')
+        # print(sys.getsizeof(data))
         outdata = cbor2.dumps(data)
-        print(sys.getsizeof(outdata))
-        print('Finish CBOR')
+        # print(sys.getsizeof(outdata))
+        # print('FINISH CBOR RENDER')
         return outdata
-        return cbor2.dumps(data)
+        #  return cbor2.dumps(data)

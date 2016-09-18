@@ -8,6 +8,7 @@ https://pypi.org/project/cbor2/
 
 import decimal
 #import msgpack
+import sys
 import cbor2        # In my tests this appeared to give better perf than cbor
 #from dateutil.parser import parse
 
@@ -53,7 +54,15 @@ class CBORParser(BaseParser):
             #                    encoding="utf-8",
             #                    object_hook=CBORDecoder().decode)
             # return cbor2.load(stream)
-            data = stream.read().decode(encoding)
-            return cbor2.loads(data)
+            # print("CBOR PARSE START")
+            # encoding = 'utf-8'
+            # data = stream.read().decode(encodoing)
+            data = stream.read()
+            # print(sys.getsizeof(data))
+            myout = cbor2.loads(data)
+            # print("CBOR PARSE FINISH")
+            # print(sys.getsizeof(myout))
+            return myout
         except Exception as exc:
-            raise ParseError('CBOR parse error - %s' % unicode(exc))
+            print(exc)
+            raise ParseError('CBOR parse error - %s' % exc)

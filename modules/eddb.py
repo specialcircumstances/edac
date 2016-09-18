@@ -207,13 +207,14 @@ class Systems(object):
                             item['simbad_ref'] = ''
                         if self.dbapi.create_system_in_db(item) is True:
                             self.systems_changed += 1
-                        #seconds = int(time.clock() - self.timestart)
-                        #srate = (self.systems_count + 1) / (seconds + 1)
-                        #crate = (self.systems_changed + 1) / (seconds + 1)
-                        #print('Read %d systems (%d/s), changed %d(%d/s)              \r' % (
-                        #        self.systems_count, srate,
-                        #        self.systems_changed, crate),
-                        #        end='')
+                        if self.systems_count % 10000 == 0:
+                            seconds = int(time.clock() - self.timestart)
+                            srate = (self.systems_count + 1) / (seconds + 1)
+                            crate = (self.systems_changed + 1) / (seconds + 1)
+                            print('Read %d systems (%d/s), changed %d(%d/s)              \r' % (
+                                    self.systems_count, srate,
+                                    self.systems_changed, crate),
+                                    end='')
                     myfile.close
                     self.dbapi.create_system_bulk_flush()
                 seconds = int(time.clock() - self.timestart)

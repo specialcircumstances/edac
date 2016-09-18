@@ -66,9 +66,13 @@ class SystemBulkUpdateProcess(Process):
                 self.result_queue.close()
                 break
             # print('%s: %d' % (proc_name, len(next_task)))
-            result = self.slumapi.systems.post(next_task)
-            self.task_queue.task_done()
-            self.result_queue.put(result)
+            try:
+                result = self.slumapi.serpysystems(format='cbor').post(next_task)
+                self.result_queue.put(result)
+            except Exception as exc:
+                printerror(exc)
+            finally:
+                self.task_queue.task_done()
         return
 
 
@@ -323,7 +327,7 @@ class SysIDCache(object):
         of the SysID cache.
         '''
         printdebug('Requesting CBOR dump of System IDs')
-        packedlist = self.cborapi.cborsystemids.get()
+        packedlist = self.cborapi.cborsystemids(format='cbor').get()
         printdebug('Reconstituting data structure')
         # Reconstruct the data
         mylist = []
@@ -623,9 +627,9 @@ class EDACDB(object):
         self.schema = self.client.get(self.dbapi)
         self.bulkschema = self.client.get(self.bulkapi)
         # Slumber Test
-        self.slumapi = slumber.API(bulkapi, auth=(username, password))
+        self.slumapi = slumber.API(bulkapi, format='cbor', auth=(username, password))
 
-        self.cborapi = slumber.API(cborurl,
+        self.cborapi = slumber.API(cborurl, format='cbor',
                                    auth=(username, password)
                                   )
         print(self.schema)  # Ordered Dict of objects

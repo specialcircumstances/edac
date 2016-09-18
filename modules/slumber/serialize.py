@@ -98,6 +98,9 @@ class Serializer(object):
         for serializer in serializers:
             self.serializers[serializer.key] = serializer
 
+        # print("Available serializers: %s" % self.serializers.keys())
+        # print("Default is %s" % default)
+
         self.default = default
 
     def get_serializer(self, name=None, content_type=None):
@@ -115,13 +118,16 @@ class Serializer(object):
             raise exceptions.SerializerNotAvailable("%s is not an available serializer" % content_type)
 
     def loads(self, data, format=None):
+        # print('Loads with: %s' % format)
         s = self.get_serializer(format)
         return s.loads(data)
 
     def dumps(self, data, format=None):
+        # print('Dumps with: %s' % format)
         s = self.get_serializer(format)
         return s.dumps(data)
 
     def get_content_type(self, format=None):
         s = self.get_serializer(format)
+        # print('get content type called: %s : %s' % (format, s.get_content_type()))
         return s.get_content_type()

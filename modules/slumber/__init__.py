@@ -51,6 +51,7 @@ class Resource(ResourceAttributesMixin, object):
     """
 
     def __init__(self, *args, **kwargs):
+        # print('INIT says kwars are: %s' % kwargs )
         self._store = kwargs
 
     def __call__(self, id=None, format=None, url_override=None):
@@ -66,12 +67,14 @@ class Resource(ResourceAttributesMixin, object):
             return self
 
         kwargs = copy_kwargs(self._store)
+        # print('__call__ kwargs: %s' % kwargs.keys())
 
         if id is not None:
             kwargs["base_url"] = url_join(self._store["base_url"], id)
 
         if format is not None:
             kwargs["format"] = format
+            # print('Slumber format set to %s' % format)
 
         if url_override is not None:
             # @@@ This is hacky and we should probably figure out a better way
@@ -85,12 +88,15 @@ class Resource(ResourceAttributesMixin, object):
 
     def _request(self, method, data=None, files=None, params=None):
         serializer = self._store["serializer"]
+        format = self._store['format']
         url = self.url()
 
-        headers = {"accept": serializer.get_content_type()}
+        #print('_request Slumber params are: ' % params)
+        headers = {"accept": serializer.get_content_type(format)}
+        #print('_request Slumber headers are: %s' % headers)
 
         if not files:
-            headers["content-type"] = serializer.get_content_type()
+            headers["content-type"] = serializer.get_content_type(format)
             if data is not None:
                 data = serializer.dumps(data)
 
@@ -156,6 +162,7 @@ class Resource(ResourceAttributesMixin, object):
 
     # TODO: refactor these methods - lots of commonality
     def get(self, **kwargs):
+        # print('Get params: %s' % kwargs.keys())
         resp = self._request("GET", params=kwargs)
         return self._process_response(resp)
 
@@ -198,7 +205,7 @@ class API(ResourceAttributesMixin, object):
     resource_class = Resource
 
     def __init__(self, base_url=None, auth=None, format=None, append_slash=True, session=None, serializer=None):
-        print('Using customised slumber')
+        # print('Using customised slumber')
         if serializer is None:
             serializer = Serializer(default=format)
 
@@ -207,6 +214,8 @@ class API(ResourceAttributesMixin, object):
 
         if auth is not None:
             session.auth = auth
+
+        # print('Slumber API format is: %s'  % format)
 
         self._store = {
             "base_url": base_url,

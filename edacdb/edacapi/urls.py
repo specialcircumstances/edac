@@ -33,5 +33,6 @@ urlpatterns = [
     url(r'^bulk/', include(bulkrouter.urls)),
     url(r'^bulk/cbor/systemids/', views.FastSysIDListView.as_view()),
     url(r'^bulk/cbor/cborsystemids/', views.CBORSysIDListView.as_view()),
+    url(r'^bulk/serpysystems/', views.SerpySystemBulkViewSet.as_view()),
     url(r'^api-auth/', include('rest_framework.urls', namespace='rest_framework'))
 ]

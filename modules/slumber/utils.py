@@ -16,11 +16,10 @@ def url_join(base, *args):
     return urlunsplit([scheme, netloc, path, query, fragment])
 
 def copy_kwargs(dictionary):
-	kwargs = {}
-	for key, value in iterator(dictionary):
-		kwargs[key] = value
-
-	return kwargs
+    kwargs = {}
+    for key, value in iterator(dictionary):
+        kwargs[key] = value
+    return kwargs
 
 def iterator(d):
     """
