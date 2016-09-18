@@ -335,7 +335,7 @@ class SysIDCache(object):
                         for ol in packedlist[cols+1:]
                         ]
             # Done - now I have a list of dicts
-        printdebug('Constructing lookup dicts')
+        printdebug('Pre-constructing lookup dicts')
         idsprocessed = 0
         # Optimisation
         # Precreate dicts using sets
@@ -346,6 +346,7 @@ class SysIDCache(object):
         self.eddb = dict.fromkeys(eddbset)  # Find by eddb
         self.edsm = dict.fromkeys(edsmset)  # Find by edsm
         self.duphash = dict.fromkeys(duphashset)   # Check if update required
+        printdebug('Populating lookup dicts')
         self.timestart = time.time()
         if len(mylist) > 0:
             for odict in mylist:
@@ -359,12 +360,13 @@ class SysIDCache(object):
                     self.edsm[edsmid] = pk
                 self.duphash[pk] = odict['duphash']
                 idsprocessed += 1
-                timenow = int(time.time() - self.timestart)
-                srate = (idsprocessed + 1) / (timenow + 1)
-                print('Processed %d systems (%d/s).             \r'
-                      % (idsprocessed,
-                         srate),
-                      end='')
+        timenow = int(time.time() - self.timestart)
+        srate = (idsprocessed + 1) / (timenow + 1)
+        print('Processed %d systems (%d/s).             \r'
+                  % (idsprocessed,
+                     srate),
+                  end='')
+
         self.sysidcount = idsprocessed
 
 
