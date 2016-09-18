@@ -176,9 +176,9 @@ class Systems(object):
                         if item['faction'] is not None:
                             self.dbapi.factionpreload(item['faction'])
                             self.factioncount += 1
-                        print('Read %d systems, found %d Factions              \r' %
-                                (self.systems_count, self.factioncount),
-                                end='')
+                        #print('Read %d systems, found %d Factions              \r' %
+                        #        (self.systems_count, self.factioncount),
+                        #        end='')
                 myfile.close
                 self.dbapi.factionpreload_flush()
             printdebug('Read %d populated systems, saw %d factions.' %
@@ -207,17 +207,22 @@ class Systems(object):
                             item['simbad_ref'] = ''
                         if self.dbapi.create_system_in_db(item) is True:
                             self.systems_changed += 1
-                        seconds = int(time.clock() - self.timestart)
-                        srate = (self.systems_count + 1) / (seconds + 1)
-                        crate = (self.systems_changed + 1) / (seconds + 1)
-                        print('Read %d systems (%d/s), changed %d(%d/s)              \r' % (
-                                self.systems_count, srate,
-                                self.systems_changed, crate),
-                                end='')
+                        #seconds = int(time.clock() - self.timestart)
+                        #srate = (self.systems_count + 1) / (seconds + 1)
+                        #crate = (self.systems_changed + 1) / (seconds + 1)
+                        #print('Read %d systems (%d/s), changed %d(%d/s)              \r' % (
+                        #        self.systems_count, srate,
+                        #        self.systems_changed, crate),
+                        #        end='')
                     myfile.close
                     self.dbapi.create_system_bulk_flush()
-                print('Read %d systems, changed %d.' % (
-                        self.systems_count, self.systems_changed))
+                seconds = int(time.clock() - self.timestart)
+                srate = (self.systems_count + 1) / (seconds + 1)
+                crate = (self.systems_changed + 1) / (seconds + 1)
+                printdebug('Read %d systems (%d/s), changed %d(%d/s)              \r' % (
+                        self.systems_count, srate,
+                        self.systems_changed, crate)
+                        )
                 printdebug('Successfully loaded JSON: %s' % filepath)
                 #self.data_load_process()
                 #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
