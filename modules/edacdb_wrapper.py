@@ -334,12 +334,18 @@ class SysIDCache(object):
                         {heads[il]:ol[il] for il in range(0, cols)}
                         for ol in packedlist[cols+1:]
                         ]
-            # Done
+            # Done - now I have a list of dicts
         printdebug('Constructing lookup dicts')
         idsprocessed = 0
-        self.eddb = {}  # Find by eddb
-        self.edsm = {}  # Find by edsm
-        self.duphash = {}   # Check if update required
+        # Optimisation
+        # Precreate dicts using sets
+        eddbset = set([item['eddbid'] for item in mylist])
+        edsmset = set([item['edsmid'] for item in mylist])
+        duphashset = set([item['duphash'] for item in mylist])
+        # What I want are several lookup dictionaries
+        self.eddb = dict.fromkeys(eddbset)  # Find by eddb
+        self.edsm = dict.fromkeys(edsmset)  # Find by edsm
+        self.duphash = dict.fromkeys(duphashset)   # Check if update required
         self.timestart = time.time()
         if len(mylist) > 0:
             for odict in mylist:
