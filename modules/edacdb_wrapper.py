@@ -362,10 +362,7 @@ class SysIDCache(object):
                 idsprocessed += 1
         timenow = int(time.time() - self.timestart)
         srate = (idsprocessed + 1) / (timenow + 1)
-        print('Processed %d systems (%d/s).             \r'
-                  % (idsprocessed,
-                     srate),
-                  end='')
+        printdebug('Processed %d systems (%d/s).' % (idsprocessed, srate))
 
         self.sysidcount = idsprocessed
 
