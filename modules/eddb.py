@@ -24,7 +24,7 @@ commodiesfile = 'modules\eddb-data\commodies.json'
 listingsfile = 'modules\eddb-data\listings.csv'
 modulesfile = 'modules\eddb-data\modules.json'
 stationsfile = 'modules\eddb-data\stations.json'
-systemsfile = 'modules\eddb-data\systemsb.jsonl'
+systemsfile = 'modules\eddb-data\systems.jsonl'
 populatedsystemsfile = 'modules\eddb-data\systems_populated.jsonl'
 
 listings = {}
