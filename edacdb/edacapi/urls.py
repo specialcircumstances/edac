@@ -21,6 +21,29 @@ router.register(r'governments', views.GovernmentViewSet)
 router.register(r'powers', views.PowerViewSet)
 router.register(r'powerstates', views.PowerStatesViewSet)
 router.register(r'economies', views.EconomyViewSet)
+router.register(r'atmostypes', views.AtmosTypeViewSet)
+router.register(r'atmoscomponents', views.AtmosComponentViewSet)
+router.register(r'atmoscomposition', views.AtmosCompositionViewSet)
+router.register(r'bodygroups', views.BodyGroupViewSet)
+router.register(r'bodytypes', views.BodyTypeViewSet)
+router.register(r'volcanismtypes', views.VolcanismTypeViewSet)
+router.register(r'ringtypes', views.RingTypeViewSet)
+router.register(r'solidtypes', views.SolidTypeViewSet)
+router.register(r'materials', views.MaterialTypeViewSet)
+router.register(r'bodies', views.BodyViewSet)
+router.register(r'solidcomposition', views.SolidCompositionViewSet)
+router.register(r'materialcomposition', views.MaterialCompositionViewSet)
+router.register(r'rings', views.RingViewSet)
+router.register(r'commoditycats', views.CommodityCategoryViewSet)
+router.register(r'commodities', views.CommodityViewSet)
+router.register(r'stationtypes', views.StationTypeViewSet)
+router.register(r'stations', views.StationViewSet)
+router.register(r'stationcommodities', views.StationCommodityViewSet)
+router.register(r'stationeconomies', views.StationEconomyViewSet)
+router.register(r'stationships', views.StationShipViewSet)
+router.register(r'stationsmodules', views.StationModuleViewSet)
+
+
 bulkrouter = BulkRouter(schema_title='EDACD API Bulk Schema', schema_url='./bulk/')
 bulkrouter.register(r'systems', views.SystemBulkViewSet, 'bulksys')
 bulkrouter.register(r'factions', views.FactionBulkViewSet, 'bulkfact')
@@ -33,6 +56,7 @@ urlpatterns = [
     url(r'^bulk/', include(bulkrouter.urls)),
     url(r'^bulk/cbor/systemids/', views.FastSysIDListView.as_view()),
     url(r'^bulk/cbor/cborsystemids/', views.CBORSysIDListView.as_view()),
-    url(r'^bulk/serpysystems/', views.SerpySystemBulkViewSet.as_view()),
+    url(r'^bulk/bcreatesystems/', views.SystemBulkCreateViewSet.as_view()),
+    url(r'^bulk/bupdatesystems/', views.SystemBulkUpdateViewSet.as_view()),
     url(r'^api-auth/', include('rest_framework.urls', namespace='rest_framework'))
 ]

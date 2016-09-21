@@ -2,6 +2,12 @@ from .models import CMDR, Ship, System
 from .models import ModuleSlot, HardpointMount
 from .models import SecurityLevel, Allegiance, State, Faction, Power
 from .models import Government, PowerState, Economy
+from .models import AtmosType, AtmosComponent
+from .models import BodyGroup, BodyType, VolcanismType, RingType, SolidType
+from .models import MaterialType, Body, SolidComposition, AtmosComposition
+from .models import MaterialComposition, Ring, CommodityCategory, Commodity
+from .models import StationType, Station, StationCommodity, StationEconomy
+from .models import StationShip, StationModule
 from rest_framework import serializers
 from rest_framework_bulk import BulkSerializerMixin, BulkListSerializer
 
@@ -172,3 +178,108 @@ class PowerStateSerializer(serializers.ModelSerializer):
 class EconomySerializer(serializers.ModelSerializer):
     class Meta:
         model = Economy
+
+
+class AtmosTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AtmosType
+
+
+class AtmosComponentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AtmosComponent
+
+
+class AtmosCompositionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AtmosComposition
+
+
+class BodyGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BodyGroup
+
+
+class BodyTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BodyType
+
+
+class VolcanismTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VolcanismType
+
+
+class RingTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RingType
+
+
+class SolidTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SolidType
+
+
+class MaterialTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialType
+
+
+class BodySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Body
+
+
+class SolidCompositionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SolidComposition
+
+
+class MaterialCompositionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialComposition
+
+
+class RingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Ring
+
+
+class CommodityCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommodityCategory
+
+
+class CommoditySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Commodity
+
+
+class StationTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StationType
+
+
+class StationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Station
+
+
+class StationCommoditySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StationCommodity
+
+
+class StationEconomySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StationEconomy
+
+
+class StationShipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StationShip
+
+
+class StationModuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StationModule

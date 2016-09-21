@@ -2,16 +2,24 @@ import time
 
 from django.shortcuts import render
 from django.db import transaction
+from django.db import IntegrityError, OperationalError
 from django.http import HttpResponse
 from django.forms.models import model_to_dict
 import json
 import cbor2 as cbor
 import sys
+import gc
 
 from .models import CMDR, Ship, System
 from .models import ModuleSlot, HardpointMount
 from .models import SecurityLevel, Allegiance, State, Faction, Power
 from .models import Government, PowerState, Economy
+from .models import AtmosType, AtmosComponent
+from .models import BodyGroup, BodyType, VolcanismType, RingType, SolidType
+from .models import MaterialType, Body, SolidComposition, AtmosComposition
+from .models import MaterialComposition, Ring, CommodityCategory, Commodity
+from .models import StationType, Station, StationCommodity, StationEconomy
+from .models import StationShip, StationModule
 from rest_framework import viewsets, views
 from rest_framework_bulk import BulkModelViewSet
 from rest_framework.response import Response
@@ -27,6 +35,18 @@ from .serializers import GovernmentSerializer, PowerStateSerializer
 from .serializers import EconomySerializer, SystemIDSerializer
 from .serializers import SystemBulkSerializer, FactionBulkSerializer
 from .serializers import SystemSerpySerializer, MyBulkSystemSerializer
+from .serializers import AtmosTypeSerializer, AtmosComponentSerializer
+from .serializers import AtmosCompositionSerializer
+from .serializers import BodyGroupSerializer, BodyTypeSerializer
+from .serializers import VolcanismTypeSerializer, RingTypeSerializer
+from .serializers import SolidTypeSerializer, MaterialTypeSerializer
+from .serializers import BodySerializer, SolidCompositionSerializer
+from .serializers import MaterialCompositionSerializer, RingSerializer
+from .serializers import CommodityCategorySerializer, CommoditySerializer
+from .serializers import StationTypeSerializer, StationSerializer
+from .serializers import StationCommoditySerializer, StationEconomySerializer
+from .serializers import StationShipSerializer, StationModuleSerializer
+
 
 
 
@@ -107,10 +127,10 @@ class SystemBulkViewSet(BulkModelViewSet):
         return super(SystemBulkViewSet, self).create(request, *args, **kwargs)
 
 
-class SerpySystemBulkViewSet(views.APIView):
+class SystemBulkCreateViewSet(views.APIView):
 
     """
-    API endpoint that allows Systems to be bulk viewed or edited.
+    A hidden API endpoint that allows Systems to be bulk created.
     """
     queryset = System.objects.all()
     renderer_classes = (CBORRenderer, )
@@ -171,6 +191,84 @@ class SerpySystemBulkViewSet(views.APIView):
         # print('Returning Response')
         # Should really put some stuff in here.
         return Response()
+
+
+class SystemBulkUpdateViewSet(views.APIView):
+
+    """
+    A hidden API endpoint that allows Systems to be bulk updated.
+    """
+    queryset = System.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    serializer_class = MyBulkSystemSerializer
+    # TODO control Bulk Deletes
+
+    # Stripped down for initial load events
+
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        # If we assume the data is good...
+        # because we already checked it in EDACAPI Wrapper
+        # It's a list of dict object - should be directly insertable in the DB
+        # We just need to find the related objects and put them in the dict
+        # print('Looking up related objects')
+        # Load the related tables in full as there are 8000+ objects in dict
+        bool(SecurityLevel.objects.all())
+        bool(State.objects.all())
+        bool(Allegiance.objects.all())
+        bool(Faction.objects.all())
+        bool(Power.objects.all())
+        bool(Government.objects.all())
+        bool(PowerState.objects.all())
+        bool(Economy.objects.all())
+        #
+        # All wrapped in a try because there could be issues outside of our
+        # control doing this...
+        try:
+            for thisdict in request.data:
+                thisdict['id'] = thisdict.pop('pk')     # Why why why ?????
+                if thisdict['security'] is not None:
+                    thisdict['security'] = SecurityLevel.objects.get(pk=thisdict['security'])
+                if thisdict['state'] is not None:
+                    thisdict['state'] = State.objects.get(pk=thisdict['state'])
+                if thisdict['allegiance'] is not None:
+                    thisdict['allegiance'] = Allegiance.objects.get(pk=thisdict['allegiance'])
+                if thisdict['faction'] is not None:
+                    thisdict['faction'] = Faction.objects.get(pk=thisdict['faction'])
+                if thisdict['power'] is not None:
+                    thisdict['power'] = Power.objects.get(pk=thisdict['power'])
+                if thisdict['government'] is not None:
+                    thisdict['government'] = Government.objects.get(pk=thisdict['government'])
+                if thisdict['power_state'] is not None:
+                    thisdict['power_state'] = PowerState.objects.get(pk=thisdict['power_state'])
+                if thisdict['primary_economy'] is not None:
+                    thisdict['primary_economy'] = Economy.objects.get(pk=thisdict['primary_economy'])
+        except Exception as exc:
+            print(exc)
+            return Response(exc, status=status.HTTP_400_BAD_REQUEST)
+        # print('Doing Bulk Save')
+        #System.objects.bulk_create([System(**thisdict) for thisdict in request.data])
+        retrycount = 120
+        for thisitem in request.data:
+            while retrycount > 0:
+                try:
+                    System.objects.filter(id=thisitem['id']).update(**thisitem)
+                    break
+                except OperationalError:
+                    # Try again
+                    print('Operational Error: DB Locked?, retrying')
+                    time.sleep(0.5)
+                    retrycount -= 1
+                except Exception as exc:
+                    print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
+                    return HttpResponse(exc, status=400)
+        # print('Returning Response')
+        # Should really put some stuff in here.
+        return Response()
+
 
 
 class SystemIDViewSet(viewsets.ReadOnlyModelViewSet):
@@ -266,6 +364,7 @@ class FastSysIDListView(views.APIView):
         #myjson = json.dumps(squeezed)
         #print(sys.getsizeof(myjson))
         starttime = time.clock()
+        gc.collect()
         mycbor = cbor.dumps(list_systems)
         endtime = time.clock()
         timetaken = endtime - starttime
@@ -354,3 +453,171 @@ class EconomyViewSet(viewsets.ModelViewSet):
     """
     queryset = Economy.objects.all()
     serializer_class = EconomySerializer
+
+
+class AtmosTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = AtmosType.objects.all()
+    serializer_class = AtmosTypeSerializer
+
+
+class AtmosComponentViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = AtmosComponent.objects.all()
+    serializer_class = AtmosComponentSerializer
+
+
+class AtmosCompositionViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = AtmosComposition.objects.all()
+    serializer_class = AtmosCompositionSerializer
+
+
+class BodyGroupViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = BodyGroup.objects.all()
+    serializer_class = BodyGroupSerializer
+
+
+class BodyTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = BodyType.objects.all()
+    serializer_class = BodyTypeSerializer
+
+
+class VolcanismTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = VolcanismType.objects.all()
+    serializer_class = VolcanismTypeSerializer
+
+
+class RingTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = RingType.objects.all()
+    serializer_class = RingTypeSerializer
+
+
+class SolidTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = SolidType.objects.all()
+    serializer_class = SolidTypeSerializer
+
+
+class MaterialTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = MaterialType.objects.all()
+    serializer_class = MaterialTypeSerializer
+
+
+class BodyViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = Body.objects.all()
+    serializer_class = BodySerializer
+
+
+class SolidCompositionViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = SolidComposition.objects.all()
+    serializer_class = SolidCompositionSerializer
+
+
+class MaterialCompositionViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = MaterialComposition.objects.all()
+    serializer_class = MaterialCompositionSerializer
+
+
+class RingViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = Ring.objects.all()
+    serializer_class = RingSerializer
+
+
+class CommodityCategoryViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = CommodityCategory.objects.all()
+    serializer_class = CommodityCategorySerializer
+
+
+class CommodityViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = Commodity.objects.all()
+    serializer_class = CommoditySerializer
+
+
+class StationTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = StationType.objects.all()
+    serializer_class = StationTypeSerializer
+
+
+class StationViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = Station.objects.all()
+    serializer_class = StationSerializer
+
+
+class StationCommodityViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = StationCommodity.objects.all()
+    serializer_class = StationCommoditySerializer
+
+
+class StationEconomyViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = StationEconomy.objects.all()
+    serializer_class = StationEconomySerializer
+
+
+class StationShipViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = StationShip.objects.all()
+    serializer_class = StationShipSerializer
+
+
+class StationModuleViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = StationModule.objects.all()
+    serializer_class = StationModuleSerializer

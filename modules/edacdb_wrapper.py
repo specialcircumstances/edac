@@ -18,6 +18,7 @@ import hashlib
 import time
 import base64
 import sys
+import gc
 from multiprocessing import Process, Queue, JoinableQueue
 from coreapi.compat import b64encode
 from urllib import parse as parse
@@ -47,9 +48,13 @@ def printerror(mystring):
 
 class SystemBulkUpdateProcess(Process):
     # Based on https://pymotw.com/2/multiprocessing/communication.html
-    def __init__(self, slumapi, task_queue, result_queue):
+    def __init__(self, bulkapi, mode, task_queue, result_queue):
         Process.__init__(self)
-        self.slumapi = slumapi
+        self.slumapi = slumber.API(bulkapi['url'],
+                                   format='cbor',
+                                   auth=(bulkapi['username'],
+                                         bulkapi['password']))
+        self.mode = mode
         self.task_queue = task_queue
         self.result_queue = result_queue
         printdebug('Created System Bulk Update Process')
@@ -67,7 +72,10 @@ class SystemBulkUpdateProcess(Process):
                 break
             # print('%s: %d' % (proc_name, len(next_task)))
             try:
-                result = self.slumapi.serpysystems(format='cbor').post(next_task)
+                if self.mode == 'create':
+                    result = self.slumapi.bcreatesystems(format='cbor').post(next_task)
+                else:
+                    result = self.slumapi.bupdatesystems(format='cbor').post(next_task)
                 self.result_queue.put(result)
             except Exception as exc:
                 printerror(exc)
@@ -78,10 +86,13 @@ class SystemBulkUpdateProcess(Process):
 
 class FactionBulkUpdateProcess(Process):
     # Based on https://pymotw.com/2/multiprocessing/communication.html
-    ''' NOT CURRENTLY USED '''
-    def __init__(self, slumapi, task_queue, result_queue):
+
+    def __init__(self, bulkapi, task_queue, result_queue):
         Process.__init__(self)
-        self.slumapi = slumapi
+        self.slumapi = slumber.API(bulkapi['url'],
+                                   format='cbor',
+                                   auth=(bulkapi['username'],
+                                         bulkapi['password']))
         self.task_queue = task_queue
         self.result_queue = result_queue
         printdebug('Created Faction Bulk Update Process')
@@ -202,12 +213,12 @@ class FactionCache(object):
             offset += limit
         self.items = mydict
 
-    def __init__(self, client, schema, slumapi, mylist):
+    def __init__(self, client, schema, bulkapi, mylist):
         printdebug('Loading Faction Cache')
         self.client = client
         self.schema = schema
         self.mylist = mylist
-        self.slumapi = slumapi
+        self.bulkapi = bulkapi
         self.refresh()
         self.bulklist = []
         self.bulkcount = 0
@@ -219,7 +230,7 @@ class FactionCache(object):
         # Create processes
         for myid in range(0, self.bulkprocesses):
             self.bulkprocess[myid] = FactionBulkUpdateProcess(
-                                        self.slumapi,
+                                        self.bulkapi,
                                         self.bulkqueue,
                                         self.resultqueue)
             self.bulkprocess[myid].start()
@@ -227,6 +238,18 @@ class FactionCache(object):
 
 
 class SysIDCache(object):
+
+    def eddbidexists(self, eddbid):
+        if eddbid in self.eddb:
+            return True
+        else:
+            return False
+
+    def getpkfromeddbid(self, eddbid):
+        if eddbid in self.eddb:
+            return self.eddb[eddbid]
+        else:
+            return None
 
     def addtocache(self, newsys):
         # We send pk but get id! grrr
@@ -238,33 +261,53 @@ class SysIDCache(object):
             self.edsm[newsys['edsmid']] = newsys['pk']
         self.duphash[newsys['pk']] = newsys['duphash']
 
-    def addtobulkupdate(self, newsys):
-        self.bulklist.append(newsys)
-        self.bulkcount += 1
-        if self.bulkcount > 8000:
-            # This hands it to other process via queue
-            self.bulkqueue.put(self.bulklist)
-            self.bulklist = []
-            self.bulkcount = 0
-            while self.bulkqueue.qsize() > self.bulkprocesses:
-                # no point letting the queue get too big
-                # This blocks
-                time.sleep(0.1)
-            # TODO update cache
+    def addtobulkupdate(self, newsys, mode):
+        if mode == 'create':
+            self.bulklist_create.append(newsys)
+            self.bulkcount_create += 1
+            if self.bulkcount_create > 8000:
+                # This hands it to other process via queue
+                self.bulkqueue_create.put(self.bulklist_create)
+                self.bulklist_create = []
+                self.bulkcount_create = 0
+                while self.bulkqueue_create.qsize() > self.bulkprocesses:
+                    # no point letting the queue get too big
+                    # This blocks
+                    time.sleep(0.1)
+                # TODO update cache
+        elif mode == 'update':
+            self.bulklist_update.append(newsys)
+            self.bulkcount_update += 1
+            if self.bulkcount_update > 8000:
+                # This hands it to other process via queue
+                self.bulkqueue_update.put(self.bulklist_update)
+                self.bulklist_update = []
+                self.bulkcount_update = 0
+                while self.bulkqueue_update.qsize() > self.bulkprocesses:
+                    # no point letting the queue get too big
+                    # This blocks
+                    time.sleep(0.1)
+                # TODO update cache
 
     def flushbulkupdate(self):
         # Empties any queue and tells process to end.
         # Can only be called once as it stops the process
         # Must be called for a clean close.
-        self.bulkqueue.put(self.bulklist)
-        for myid in range(0, self.bulkprocesses):
-            self.bulkqueue.put(None)    # One for each process?
-        self.bulkqueue.close()
-        printdebug('closed bulkqueue')
-        self.bulkqueue.join()
-        printdebug('bulkqueue join complete')
-        while self.resultqueue.empty() is not True:
-            garbage = self.resultqueue.get()
+        self.bulkqueue_create.put(self.bulklist_create)
+        self.bulkqueue_update.put(self.bulklist_update)
+        for myid in range(0, self.bulkprocesses, 2):
+            self.bulkqueue_create.put(None)    # One for each process?
+            self.bulkqueue_update.put(None)    # One for each process?
+        self.bulkqueue_create.close()
+        self.bulkqueue_update.close()
+        printdebug('closed bulkqueues')
+        self.bulkqueue_create.join()
+        self.bulkqueue_update.join()
+        printdebug('bulkqueue joins complete')
+        while self.resultqueue_create.empty() is not True:
+            garbage = self.resultqueue_create.get()
+        while self.resultqueue_update.empty() is not True:
+            garbage = self.resultqueue_update.get()
         for myid in range(0, self.bulkprocesses):
             self.bulkprocess[myid].join()
         printdebug('Flushed System Bulk Update Process.')
@@ -280,18 +323,19 @@ class SysIDCache(object):
                 if system['edsmid'] in self.edsm.keys():
                     dbid = self.edsm[system['edsmid']]
         if dbid is None:
-            self.addtobulkupdate(system)
+            self.addtobulkupdate(system, 'create')
             return True
         else:
             # check if we need to update
             if self.duphash[dbid] != system['duphash']:
                 system['pk'] = dbid
-                try:        # TODO make a bulk updater
-                    newsys = self.client.action(self.schema, ['systems', 'update'], params=system)
-                    self.addtocache(newsys)
-                except Exception as e:
-                    print(str(e))
-                    print(system)
+                self.addtobulkupdate(system, 'update')
+                #try:        # TODO make a bulk updater
+                #    newsys = self.client.action(self.schema, ['systems', 'update'], params=system)
+                #    self.addtocache(newsys)
+                #except Exception as e:
+                #    print(str(e))
+                #    print(system)
                 return True
             else:
                 return False
@@ -326,8 +370,14 @@ class SysIDCache(object):
         cbor to massively reduce the time it take to get a fresh copy
         of the SysID cache.
         '''
+        gc.collect()            # some items can be large
+        bulkapi = self.bulkapi
+        slumapi = slumber.API(bulkapi['url'],
+                                   format='cbor',
+                                   auth=(bulkapi['username'],
+                                         bulkapi['password']))
         printdebug('Requesting CBOR dump of System IDs')
-        packedlist = self.cborapi.cborsystemids(format='cbor').get()
+        packedlist = slumapi.cbor.cborsystemids.get()
         printdebug('Reconstituting data structure')
         # Reconstruct the data
         mylist = []
@@ -339,6 +389,8 @@ class SysIDCache(object):
                         for ol in packedlist[cols+1:]
                         ]
             # Done - now I have a list of dicts
+        # free up the memory
+        del packedlist
         printdebug('Pre-constructing lookup dicts')
         idsprocessed = 0
         # Optimisation
@@ -440,49 +492,271 @@ class SysIDCache(object):
 
 
 
-    def __init__(self, client, schema, slumapi, cborapi, mylist):
+    def __init__(self, client, schema, bulkapi, mylist):
         printdebug('Loading SysID Cache - this can take some time...')
         self.client = client
         self.schema = schema
-        self.slumapi = slumapi
-        self.cborapi = cborapi
+        self.bulkapi = bulkapi
         self.mylist = mylist
         self.sysidcount = 0
-        self.bulklist = []
-        self.bulkcount = 0
-        self.bulkthreads = 0
+        self.bulklist_create = []
+        self.bulklist_update = []
+        self.bulkcount_create = 0
+        self.bulkcount_update = 0
         self.timestart = time.clock()
         self.refresh()
-        self.bulkqueue = JoinableQueue()
-        self.resultqueue = Queue()
-        self.bulkprocesses = 4
+        self.bulkqueue_create = JoinableQueue()
+        self.bulkqueue_update = JoinableQueue()
+        self.resultqueue_create = Queue()
+        self.resultqueue_update = Queue()
+        self.bulkprocesses = 8
         self.bulkprocess = {}
         # Create processes
-        for myid in range(0, self.bulkprocesses):
+        for myid in range(0, self.bulkprocesses, 2):
             self.bulkprocess[myid] = SystemBulkUpdateProcess(
-                                        self.slumapi,
-                                        self.bulkqueue,
-                                        self.resultqueue)
+                                        self.bulkapi,
+                                        'create',   # mode
+                                        self.bulkqueue_create,
+                                        self.resultqueue_create)
+            self.bulkprocess[myid + 1] = SystemBulkUpdateProcess(
+                                        self.bulkapi,
+                                        'update',   # mode
+                                        self.bulkqueue_update,
+                                        self.resultqueue_update)
             self.bulkprocess[myid].start()
+            self.bulkprocess[myid + 1].start()
+        #print(self.items)
+
+
+class BodyCache(object):
+    #
+
+    def addtocache(self, newsys):
+        # We send pk but get id! grrr
+        if 'id' in newsys.keys():
+            newsys['pk'] = newsys['id']
+        if newsys['eddbid'] is not None:
+            self.eddb[newsys['eddbid']] = newsys['pk']
+        if newsys['edsmid'] is not None:
+            self.edsm[newsys['edsmid']] = newsys['pk']
+        self.duphash[newsys['pk']] = newsys['duphash']
+
+    def findoradd(self, body):
+        dbid = None
+        if body['eddbid'] is not None:
+            if body['eddbid'] in self.eddb.keys():
+                dbid = self.eddb[body['eddbid']]
+            elif 'edsmid' in body:
+                if body['edsmid'] is not None:
+                    if body['edsmid'] in self.edsm.keys():
+                        dbid = self.edsm[body['edsmid']]
+        if dbid is None:
+            try:
+                newitem = self.client.action(
+                                self.schema,
+                                [self.mylist, 'create'],
+                                params=body)
+                self.addtocache(newitem)
+                return newitem['pk']
+            except Exception as e:
+                print('Exception in Body FoA create.')
+                print(str(e))
+                print(body)
+                return None
+        else:
+            # check if we need to update
+            if self.duphash[dbid] != body['duphash']:
+                body['pk'] = dbid
+                try:        # TODO make a bulk updater?
+                    newitem = self.client.action(self.schema,
+                                                [self.mylist, 'update'],
+                                                params=body)
+                    self.addtocache(newitem)    # to update duphash
+                except Exception as e:
+                    print('Exception in Body FoA update.')
+                    print(str(e))
+                    print(body)
+                return dbid
+            else:
+                return dbid
+
+    def refresh(self):
+        mylist = self.client.action(self.schema, [self.mylist, 'list'])
+        self.count = mylist['count']
+        limit = 10000
+        offset = 0
+        # mydict = {}
+        while offset < self.count:
+            mylist = self.client.action(
+                                self.schema,
+                                [self.mylist, 'list'],
+                                params={'limit': limit, 'offset': offset})
+            if len(mylist) > 0:
+                for odict in mylist['results']:
+                    # print(odict)
+                    eddbid = odict['eddbid']
+                    edsmid = odict['edsmid']       # Does EDSM track bodies?
+                    duphash = odict['duphash']
+                    pk = odict['id']    # WHY IS THIS NOT PK ???????
+                    if eddbid is not None:
+                        self.eddb[eddbid] = pk
+                    if edsmid is not None:
+                        self.edsm[edsmid] = pk
+                    if duphash is not None:
+                        self.duphash[pk] = duphash
+            offset += limit
+        # self.items = mydict
+
+    def __init__(self, client, schema, mylist):
+        printdebug('Loading %s Cache' % mylist)
+        self.client = client
+        self.schema = schema
+        self.mylist = mylist
+        self.eddb = {}
+        self.edsm = {}
+        self.duphash = {}
+        self.refresh()
+        # print(self.items)
+
+
+class CompositionCache(object):
+    # Composition Cache
+
+    def findoradd(self, indict):
+        if type(indict) is dict:
+            if 'related_body' in indict:
+                # Means we have a dict containing a body reference
+                if 'component' in indict:
+                    # and a component
+                    if 'share' in indict:
+                        pass
+                    else:
+                        printerror('CompositionCache requires a share')
+                        return None
+                else:
+                    printerror('CompositionCache requires a component')
+                    return None
+            else:
+                # Unsupported dict
+                printerror('CompositionCache requires a related_body')
+                return None
+        else:
+            printerror('Composition Cache needs a dict please.')
+            return None
+        body = indict['related_body']
+        comp = indict['component']
+        share = indict['share']
+        action = 'create'
+        if body in self.items:   # We already have this body in our cache
+            if comp in self.items[body]:
+                if self.items[body][comp]['share'] == share:
+                    return self.items[body][comp]['id']
+                else:
+                    action = 'update'  # Update existing
+        myparams = {
+            'component': comp,
+            'related_body': body,
+            'share' : share
+        }
+        if action == 'update':
+            myparams['pk'] = self.items[body][comp]['id']
+        try:
+            odict = self.client.action(
+                            self.schema,
+                            [self.mylist, action],
+                            params=myparams)
+            # self.refresh() this too expensive when list is long
+            # newitem might look like this
+            # OrderedDict([('id', 2039),
+            # ('name', 'Nationalists of Belarsuk'), ('reputaion', 'NEUTRAL')])
+            body = odict['related_body']
+            comp = odict['component']
+            share = odict['share']
+            pk = odict['id']
+            if body not in self.items:
+                self.items[body] = {}
+            self.items[body][comp] = {'share': share, 'id': pk}
+        except Exception as e:
+            print(str(e))
+            print(myparams)
+        return self.items[body][comp]['id']
+
+    def refresh(self):
+        mylist = self.client.action(self.schema, [self.mylist, 'list'])
+        self.count = mylist['count']
+        limit = 10000
+        offset = 0
+        '''
+        I get a list of dicts with component, related_body and share
+        I was a dict of related_body with dicts of components containing shares
+        and the pk - might the pk for updates off share values
+        '''
+        mydict = {}
+        while offset < self.count:
+            mylist = self.client.action(
+                                self.schema,
+                                [self.mylist, 'list'],
+                                params={'limit': limit, 'offset': offset})
+            if len(mylist) > 0:
+                for odict in mylist['results']:
+                    body = odict['related_body']
+                    comp = odict['component']
+                    share = odict['share']
+                    pk = odict['id']
+                    if body not in mydict:
+                        mydict[body] = {}
+                    mydict[body][comp] = {'share': share, 'id': pk}
+            offset += limit
+        self.items = mydict
+
+    def __init__(self, client, schema, mylist):
+        printdebug('Loading %s Cache' % mylist)
+        self.client = client
+        self.schema = schema
+        self.mylist = mylist
+        self.refresh()
         #print(self.items)
 
 
 class ItemCache(object):
-    #
+    # Default Item Cache, suitable for most items.
 
-    def findoradd(self, item):
+    def findoradd(self, initem):
+        isdict = False
+        iseddblookup = False
+        if type(initem) is dict:
+            isdict = True
+            if 'eddbid' in initem:
+                # Means we have a dict containing eddbid and name
+                # for the various lookup tables we mirror
+                iseddblookup = True
+                item = initem['eddbid']
+            else:
+                # Unsupported dict
+                printerror('ItemCache does not support this dictionary')
+                printerror(initem)
+                return None
+        else:
+            # assume single item is name
+            item = initem
         if item is None:
                 return None
         if item == 'None':
                 return None
         if item == '':
                 return None
-        if item in self.items.keys():
+        if item in self.items.keys():   # We already have this in our cache
             return self.items[item]
         else:
-            myparams = {
-                'name': item
-            }
+            if iseddblookup is True:
+                myparams = {
+                    'eddbid': item,
+                    'name': initem['name']
+                }
+            else:
+                myparams = {
+                    'name': item
+                }
             try:
                 newitem = self.client.action(
                                 self.schema,
@@ -492,7 +766,10 @@ class ItemCache(object):
                 # newitem might look like this
                 # OrderedDict([('id', 2039),
                 # ('name', 'Nationalists of Belarsuk'), ('reputaion', 'NEUTRAL')])
-                self.items[newitem['name']] = newitem['id']
+                if iseddblookup is True:
+                    self.items[newitem['eddbid']] = newitem['id']
+                else:
+                    self.items[newitem['name']] = newitem['id']
             except Exception as e:
                 print(str(e))
                 print(myparams)
@@ -520,7 +797,10 @@ class ItemCache(object):
                                 params={'limit': limit, 'offset': offset})
             if len(mylist) > 0:
                 for odict in mylist['results']:
-                    mydict[odict['name']] = odict['id']
+                    if 'eddbid' in odict:
+                        mydict[odict['eddbid']] = odict['id']
+                    else:
+                        mydict[odict['name']] = odict['id']
             offset += limit
         self.items = mydict
 
@@ -536,8 +816,9 @@ class ItemCache(object):
 class DBCache(object):
     # improve system import time
 
-    def __init__(self, client, schema, slumapi, cborapi):
-        self.systemids = SysIDCache(client, schema, slumapi, cborapi, 'systemids')
+    def __init__(self, client, schema, bulkapi):
+        # Systems Caches (not exclusively)
+        self.systemids = SysIDCache(client, schema, bulkapi, 'systemids')
         self.securitylevels = ItemCache(client, schema, 'securitylevels')
         self.allegiances = ItemCache(client, schema, 'allegiances')
         self.sysstates = ItemCache(client, schema, 'sysstates')
@@ -546,7 +827,24 @@ class DBCache(object):
         self.powerstates = ItemCache(client, schema, 'powerstates')
         self.governments = ItemCache(client, schema, 'governments')
         self.economies = ItemCache(client, schema, 'economies')
-        self.bulkfactions = FactionCache(client, schema, slumapi, 'factions')
+        self.bulkfactions = FactionCache(client, schema, bulkapi, 'factions')
+        # Bodies Caches
+        self.atmostypes = ItemCache(client, schema, 'atmostypes')
+        self.atmoscomponents = ItemCache(client, schema, 'atmoscomponents')
+        self.bodygroups = ItemCache(client, schema, 'bodygroups')
+        self.bodytypes = ItemCache(client, schema, 'bodytypes')
+        self.volcanismtypes = ItemCache(client, schema, 'volcanismtypes')
+        self.ringtypes = ItemCache(client, schema, 'ringtypes')
+        self.bodies = BodyCache(client, schema, 'bodies')
+        self.solidtypes = ItemCache(client, schema, 'solidtypes')
+        self.materials = ItemCache(client, schema, 'materials')
+        # Composition Caches
+        self.atmoscomposition = CompositionCache(client, schema, 'atmoscomposition')
+        self.solidcomposition = CompositionCache(client, schema, 'solidcomposition')
+        self.materialcomposition = CompositionCache(client, schema, 'materialcomposition')
+
+
+
 
 
 class EDACDB(object):
@@ -569,6 +867,135 @@ class EDACDB(object):
         #return hashlib.md5(data).hexdigest()[0:15]
         #b'iMjj8tMyETkJqEszZ-dZJQ=='
 
+    def create_eddb_body_in_db(self, body):
+        # find or add will add to db if necessary and refresh
+        # This replaces eddb lookups with our own
+        # Simple bits first
+        # Check if related system is in our DB
+        # printdebug('Simple Lookups')
+        if self.cache.systemids.eddbidexists(body['system_id']) is False:
+            printerror('EDDB System ID (%d) is unknown in EDDB bodies import.'
+                       % body['system_id'])
+            return False
+        #
+        body['system'] = self.cache.systemids.getpkfromeddbid(body['system_id'])
+        body.pop('system_id')
+        body['atmosphere_type_id'] = self.cache.atmostypes.findoradd(
+                                       {'eddbid': body['atmosphere_type_id'],
+                                        'name': body['atmosphere_type_name']
+                                        })
+        body.pop('atmosphere_type_name')
+        body['group_id'] = self.cache.bodygroups.findoradd(
+                                       {'eddbid': body['group_id'],
+                                        'name': body['group_name']
+                                        })
+        body.pop('group_name')
+        body['type_id'] = self.cache.bodytypes.findoradd(
+                                       {'eddbid': body['type_id'],
+                                        'name': body['type_name']
+                                        })
+        body.pop('type_name')
+        body['volcanism_type_id'] = self.cache.volcanismtypes.findoradd(
+                                       {'eddbid': body['volcanism_type_id'],
+                                        'name': body['volcanism_type_name']
+                                        })
+        body.pop('volcanism_type_name')
+        # printdebug('Compositions - Components')
+        # OK Atmosphere Compositions
+        atmoscomposition = body.pop('atmosphere_composition')
+        # List of "atmosphere_composition":
+        # [{"atmosphere_component_id":9,"share":91.2,
+        #   "atmosphere_component_name":"Nitrogen"},
+        #  {"atmosphere_component_id":10,"share":8.7,
+        # "atmosphere_component_name":"Oxygen"},
+        if len(atmoscomposition) > 0:
+            # Ensure all the components exist
+            for component in atmoscomposition:
+                component['atmosphere_component_id'] = self.cache.atmoscomponents.findoradd({
+                    'eddbid': component['atmosphere_component_id'],
+                    'name': component['atmosphere_component_name']
+                    })
+                component.pop('atmosphere_component_name')
+        #
+        solidcomposition = body.pop('solid_composition')
+        if len(solidcomposition) > 0:
+            # Ensure all the components exist
+            for component in solidcomposition:
+                component['solid_component_id'] = self.cache.solidtypes.findoradd({
+                    'eddbid': component['solid_component_id'],
+                    'name': component['solid_component_name']
+                    })
+                component.pop('solid_component_name')
+        #
+        rings = body.pop('rings')
+        '''
+        "rings":[{"id":23,"created_at":1466612897,"updated_at":1466612897,
+            "name":"D Ring","semi_major_axis":0,"ring_type_id":1,
+            "ring_mass":250560.2,"ring_inner_radius":74500,
+            "ring_outer_radius":140180,"ring_type_name":"Icy"}]
+        '''
+        if len(rings) > 0:
+            for ring in rings:
+                ring['ring_type_id'] = self.cache.ringtypes.findoradd({
+                    'eddbid': ring['ring_type_id'],
+                    'name': ring['ring_type_name']
+                    })
+                ring.pop('ring_type_name')
+        #
+        materials = body.pop('materials')
+        if len(materials) > 0:
+            # Ensure all the components exist
+            for component in materials:
+                component['material_id'] = self.cache.materials.findoradd({
+                    'eddbid': component['material_id'],
+                    'name': component['material_name']
+                    })
+                component.pop('material_name')
+        # Add body to DB if required:
+        hashdata = ""
+        for key in sorted(body.keys()):
+            hashdata += str(body[key])
+        body['duphash'] = self.duphash(hashdata)
+        newitemid = self.cache.bodies.findoradd(body)
+        # print('Body ID: %d' % newitemid)
+        # Now we have a reference ID for the system we can update the
+        # Composition tables
+        if len(atmoscomposition) > 0:
+            # Ensure all the components exist
+            for component in atmoscomposition:
+                self.cache.atmoscomposition.findoradd({
+                    'component': component['atmosphere_component_id'],
+                    'related_body': newitemid,
+                    'share': component['share']
+                })
+        #
+        if len(solidcomposition) > 0:
+            # Ensure all the components exist
+            for component in solidcomposition:
+                self.cache.solidcomposition.findoradd({
+                    'component': component['solid_component_id'],
+                    'related_body': newitemid,
+                    'share': component['share']
+                })
+        #
+        if len(materials) > 0:
+            # Ensure all the components exist
+            for component in materials:
+                result = self.cache.materialcomposition.findoradd({
+                    'component': component['material_id'],
+                    'related_body': newitemid,
+                    'share': component['share']
+                })
+                if result is None:
+                    printerror('Could not findadd materials.')
+                    printerror(component)
+                    printerror(materials)
+                    printerror(body)
+        #
+        #
+
+
+
     def create_system_in_db(self, system):
         # System is Dict
         # Everything is optional...
@@ -588,6 +1015,7 @@ class EDACDB(object):
         system['power_state'] = self.cache.powerstates.findoradd(system['power_state'])
         system['government'] = self.cache.governments.findoradd(system['government'])
         system['primary_economy'] = self.cache.economies.findoradd(system['primary_economy'])
+        #
         hashdata = ""
         for key in sorted(system.keys()):
             hashdata += str(system[key])
@@ -607,7 +1035,7 @@ class EDACDB(object):
     def __init__(
             self,
             dbapi=default_dbapi,
-            bulkapi=default_bulkapi,
+            bulkurl=default_bulkapi,
             cborurl=default_cborapi,
             username=default_username,
             password=default_password
@@ -622,19 +1050,17 @@ class EDACDB(object):
         http_transport = coreapi.transports.HTTPTransport(credentials=credentials)
         self.client = coreapi.Client(transports=[http_transport])
         self.dbapi = dbapi
-        self.bulkapi = bulkapi
-        self.cborurl = cborurl
+        self.bulkapi = {
+            'url': bulkurl,
+            'username': username,
+            'password': password
+        }
         self.schema = self.client.get(self.dbapi)
-        self.bulkschema = self.client.get(self.bulkapi)
-        # Slumber Test
-        self.slumapi = slumber.API(bulkapi, format='cbor', auth=(username, password))
+        self.bulkschema = self.client.get(self.bulkapi['url'])
 
-        self.cborapi = slumber.API(cborurl, format='cbor',
-                                   auth=(username, password)
-                                  )
-        print(self.schema)  # Ordered Dict of objects
-        print(self.bulkschema)
-        self.cache = DBCache(self.client, self.schema, self.slumapi, self.cborapi)
+        #print(self.schema)  # Ordered Dict of objects
+        #print(self.bulkschema)
+        self.cache = DBCache(self.client, self.schema, self.bulkapi)
         # e.g.
         # OrderedDict([
         #    ('cmdrs', 'http://127.0.0.1:8000/edacapi/cmdrs/'),

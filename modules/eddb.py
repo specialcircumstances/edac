@@ -19,7 +19,7 @@ except:
 
 # These files should be from
 # https://github.com/EDCD/FDevIDs
-bodiesfile = 'modules\eddb-data\bodies.json'
+bodiesfile = 'modules\eddb-data\\bodies.jsonl'
 commodiesfile = 'modules\eddb-data\commodies.json'
 listingsfile = 'modules\eddb-data\listings.csv'
 modulesfile = 'modules\eddb-data\modules.json'
@@ -141,14 +141,16 @@ class Systems(object):
             return myobj
 
 
-    def __init__(self, filepath=systemsfile):
-        # Well, we need to open the filepath
+    def __init__(self, dbapi, filepath=systemsfile):
+        if type(dbapi) is not EDACDB:
+            printerror('dbapi must be of type EDACDB()')
+            return False
         self.systems = {}
         self.systems_count = 0
         self.systems_changed = 0
         self.types = {}
         self.lastsystem = None
-        self.dbapi = EDACDB()
+        self.dbapi = dbapi
         ''' Need to convert from
         {'updated_at': 1460286842, 'government': 'Corporate', 'y': 28.53125,
         'faction': '1 Hydrae Vision Solutions', 'simbad_ref': '1 Hydrae',
@@ -184,7 +186,7 @@ class Systems(object):
             printdebug('Read %d populated systems, saw %d factions.' %
                   (self.systems_count, self.factioncount)
                   )
-        # OK, now bulk system updates will be usable (mostly)
+        # OK, now bulk system updates will be more functional (mostly)
         self.systems_count = 0
         if isfile(filepath):
             printdebug('%s found. Starting to load EDDB data.' % filepath)
@@ -225,6 +227,11 @@ class Systems(object):
                         self.systems_changed, crate)
                         )
                 printdebug('Successfully loaded JSON: %s' % filepath)
+                # Need to reload the SystemID cache if anything changed
+                # As the bulk updater doesn't current update the cache contents
+                if self.systems_changed > 0:
+                    printdebug('Reloading SystemID Cache')
+                    self.dbapi.cache.systemsids.refresh()
                 #self.data_load_process()
                 #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
                 self.loaded = True  # TODO better checks here
@@ -232,15 +239,96 @@ class Systems(object):
             #    print(str(e))
 
         else:
-            printerror('%s not found. Cannot load EDDB data.' % filepath)
+            printerror('%s not found. Cannot load EDDB systems data.' % filepath)
 
+class Bodies(object):
+
+    def __init__(self, dbapi, filepath=bodiesfile):
+        # Well, we need to open the filepath
+        if type(dbapi) is not EDACDB:
+            printerror('dbapi must be of type EDACDB()')
+            return False
+        self.bodies = {}
+        self.bodies_count = 0
+        self.bodies_changed = 0
+        self.types = {}
+        self.dbapi = dbapi
+        if isfile(filepath):
+            printdebug('%s found. Starting to load EDDB Bodies data.' % filepath)
+            self.timestart = time.clock()
+            if True:
+                with open(filepath, 'r', encoding='utf-8') as myfile:
+                    for line in myfile:
+                        item = json.loads(line)
+                        self.bodies_count += 1
+                        # Tidy up fields to match DB
+                        # print(item)
+                        item['eddbid'] = item.pop('id')
+                        item['eddb_created_at'] = item.pop('created_at')
+                        item['eddb_updated_at'] = item.pop('updated_at')
+                        # These are Ints for me
+                        if item['catalogue_hd_id'] == '':
+                            item['catalogue_hd_id'] = None
+                        elif type(item['catalogue_hd_id']) is str:
+                            item['catalogue_hd_id'] = int(item['catalogue_hd_id'].replace(',', '').replace('.', ''))
+                        #
+                        if item['catalogue_hipp_id'] == '':
+                            item['catalogue_hipp_id'] = None
+                        elif type(item['catalogue_hipp_id']) is str:
+                            item['catalogue_hipp_id'] = int(item['catalogue_hipp_id'].replace(',', '').replace('.', ''))
+                        # str cannot be Null in DB
+                        if item['catalogue_gliese_id'] is None:
+                            item['catalogue_gliese_id'] = ''
+                        # str cannot be Null in DB
+                        if item['luminosity_sub_class'] is None:
+                            item['luminosity_sub_class'] = ''
+                        # str cannot be Null in DB
+                        if item['full_spectral_class'] is None:
+                            item['full_spectral_class'] = ''
+                        # str cannot be Null in DB
+                        if item['luminosity_class'] is None:
+                            item['luminosity_class'] = ''
+                        # str cannot be Null in DB
+                        if item['spectral_class'] is None:
+                            item['spectral_class'] = ''
+                        #
+                        if self.dbapi.create_eddb_body_in_db(item) is True:
+                            self.systems_changed += 1
+                        if self.bodies_changed % 100 == 0:
+                            seconds = int(time.clock() - self.timestart)
+                            srate = (self.bodies_count + 1) / (seconds + 1)
+                            crate = (self.bodies_changed + 1) / (seconds + 1)
+                            print('Read %d bodies (%d/s), changed %d(%d/s)              \r' % (
+                                    self.bodies_count, srate,
+                                    self.bodies_changed, crate),
+                                    end='')
+                    myfile.close
+                    #self.dbapi.create_system_bulk_flush()
+                seconds = int(time.clock() - self.timestart)
+                srate = (self.bodies_count + 1) / (seconds + 1)
+                crate = (self.bodies_changed + 1) / (seconds + 1)
+                printdebug('Read %d bodies (%d/s), changed %d(%d/s)              \r' % (
+                        self.bodies_count, srate,
+                        self.bodies_changed, crate)
+                        )
+                printdebug('Successfully loaded bodies JSON: %s' % filepath)
+                #self.data_load_process()
+                #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
+                self.loaded = True  # TODO better checks here
+            #except Exception as e:
+            #    print(str(e))
+
+        else:
+            printerror('%s not found. Cannot load EDDB Bodies data.' % filepath)
 
 
 
 if __name__ == '__main__':
     #import_listings()
     #print('Listings count is: %d' % listings_count)
-    mysystems = Systems()
+    dbapi = EDACDB()
+    mysystems = Systems(dbapi)
+    mybodies = Bodies(dbapi)
     #print(mysystems.lastsystem)
     #print(mysystems.types)
     #max_len =  0

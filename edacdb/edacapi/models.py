@@ -209,3 +209,321 @@ class System(models.Model):
     primary_economy = models.ForeignKey(Economy, models.SET_NULL, blank=True, null=True)
     #
     duphash = models.CharField(max_length=8, blank=True, default='')
+
+
+class AtmosType(models.Model):      # Overall Type
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=32, blank=True, default='')
+''' 'atmosphere_type_name': [None,
+                          'No atmosphere',
+                          'Carbon dioxide',
+                          'Suitable for water based life',
+                          'Sulphur dioxide',
+                          'Methane-rich',
+                          'Methane',
+                          'Argon-rich',
+                          'Nitrogen',
+                          'Water',
+                          'Silicate vapour',
+                          'Mateallic vapour',
+                          'Ammonia and oxygen',
+                          'Ammonia',
+                          'Helium',
+                          'Water-rich',
+                          'Ammonia-rich',
+                          'Neon-rich',
+                          'Argon',
+                          'Neon',
+                          'Oxygen',
+                          'Carbon dioxide-rich',
+                          'Nitrogen-rich'],'''
+
+
+class AtmosComponent(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=32, blank=True, default='')
+'''{'atmosphere_component_name': ['Carbon dioxide',
+                               'Nitrogen',
+                               'Oxygen',
+                               'Argon',
+                               'Water',
+                               'Hydrogen',
+                               'Helium',
+                               'Sulphur dioxide',
+                               'Silicates',
+                               'Methane',
+                               'Ammonia',
+                               'Iron',
+                               'Neon'],'''
+
+
+
+class BodyGroup(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=16, blank=True, default='')
+    '''   'group_name': ['Star', 'Planet', 'Belt', 'Compact star'], '''
+
+
+class BodyType(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    ''' 'type_name': [None,
+               'Metal-rich body',
+               'High metal content world',
+               'Earth-like world',
+               'Rocky body',
+               'Class I gas giant',
+               'Icy body',
+               'Rocky ice world',
+               'Supermassive black hole',
+               'Class IV gas giant',
+               'Black hole',
+               'Water giant',
+               'Class III gas giant',
+               'Gas giant with ammonia-based life',
+               'Gas giant with water-based life',
+               'Water world',
+               'Class V gas giant',
+               'Ammonia world',
+               'Class II gas giant',
+               'Neutron star',
+               'Helium-rich gas giant'],'''
+
+
+class VolcanismType(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    ''' 'volcanism_type_name': [None,
+                         'No volcanism',
+                         'Silicate magma',
+                         'Water magma',
+                         'Water geysers',
+                         'Methane magma',
+                         'Iron magma',
+                         'Silicate vapour geysers',
+                         'Carbon dioxide geysers',
+                         'Ammonia magma',
+                         'Nitrogen magma']}'''
+
+
+class RingType(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    ''' 'ring_type_name': ['Rocky', 'Icy', 'Metal Rich', 'Metallic', None],'''
+
+
+class SolidType(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    ''' 'solid_component_name': ['Rock', 'Metal', 'Ice'],'''
+
+
+class MaterialType(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    ''' 'material_name': ['Carbon',
+                   'Iron',
+                   'Nickel',
+                   'Phosphorus',
+                   'Sulphur',
+                   'Chromium',
+                   'Germanium',
+                   'Manganese',
+                   'Mercury',
+                   'Tin',
+                   'Ruthenium',
+                   'Arsenic',
+                   'Vanadium',
+                   'Cadmium',
+                   'Molybdenum',
+                   'Antimony',
+                   'Zirconium',
+                   'Tungsten',
+                   'Niobium',
+                   'Selenium',
+                   'Tellurium',
+                   'Zinc',
+                   'Yttrium',
+                   'Polonium',
+                   'Technetium'],'''
+
+
+class Body(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    edsmid = models.IntegerField(unique=True, blank=True, null=True)
+    #
+    age = models.IntegerField(blank=True, null=True)
+    arg_of_periapsis = models.FloatField(blank=True, null=True)
+    # atmosphere_composition = lookup to here
+    atmosphere_type_id = models.ForeignKey(AtmosType, models.SET_NULL, blank=True, null=True)
+    axis_tilt = models.FloatField(blank=True, null=True)
+    belt_moon_masses = models.FloatField(blank=True, null=True)
+    catalogue_gliese_id = models.CharField(max_length=8, blank=True, default='')
+    catalogue_hd_id = models.IntegerField(blank=True, null=True)
+    catalogue_hipp_id = models.IntegerField(blank=True, null=True)
+    distance_to_arrival = models.FloatField(blank=True, null=True)
+    earth_masses = models.FloatField(blank=True, null=True)
+    eg_id = models.IntegerField(blank=True, null=True)
+    full_spectral_class = models.CharField(max_length=32, blank=True, default='') # TODO make property
+    spectral_class = models.CharField(max_length=4, blank=True, default='')
+    spectral_sub_class = models.IntegerField(blank=True, null=True)
+    luminosity_class = models.CharField(max_length=3, blank=True, default='')
+    luminosity_sub_class = models.CharField(max_length=6, blank=True, default='')
+    # TODO make scoopable property based on spectral class
+    gravity = models.FloatField(blank=True, null=True)
+    group_id = models.ForeignKey(BodyGroup, models.SET_NULL, blank=True, null=True)
+    is_main_star = models.NullBooleanField(blank=True, null=True) # Y N ?
+    is_rotational_period_tidally_locked = models.NullBooleanField(blank=True, null=True) # Y N ?
+    # materials - lookup to here
+    name = models.CharField(db_index=True, max_length=64, blank=True, default='')
+    orbital_eccentricity = models.FloatField(blank=True, null=True)
+    orbital_inclination = models.FloatField(blank=True, null=True)
+    orbital_period = models.FloatField(blank=True, null=True)
+    radius = models.FloatField(blank=True, null=True)
+    # rings Lookup to here
+    rotational_period = models.FloatField(blank=True, null=True)
+    semi_major_axis = models.FloatField(blank=True, null=True)
+    solar_masses = models.FloatField(blank=True, null=True)
+    solar_radius = models.FloatField(blank=True, null=True)
+    # solid_composition lookup to here
+    surface_pressure = models.FloatField(blank=True, null=True)
+    surface_temperature = models.IntegerField(blank=True, null=True)
+    system = models.ForeignKey(System, models.SET_NULL, blank=True, null=True)
+    terraforming_state_id = models.IntegerField(blank=True, null=True)
+    type_id = models.ForeignKey(BodyType, models.SET_NULL, blank=True, null=True)
+    volcanism_type_id = models.ForeignKey(VolcanismType, models.SET_NULL, blank=True, null=True)
+    eddb_created_at = models.IntegerField(blank=True, null=True)
+    eddb_updated_at = models.IntegerField(blank=True, null=True)
+    duphash = models.CharField(max_length=8, blank=True, default='')
+
+
+class SolidComposition(models.Model):
+    component = models.ForeignKey(SolidType, models.CASCADE)
+    related_body = models.ForeignKey(Body, models.CASCADE)
+    share = models.FloatField(blank=True, null=True)
+
+
+class AtmosComposition(models.Model):
+    component = models.ForeignKey(AtmosComponent, models.CASCADE)
+    related_body = models.ForeignKey(Body, models.CASCADE)
+    share = models.FloatField(blank=True, null=True)
+
+
+class MaterialComposition(models.Model):
+    component = models.ForeignKey(MaterialType, models.CASCADE)
+    related_body = models.ForeignKey(Body, models.CASCADE)
+    share = models.FloatField(blank=True, null=True)
+
+
+class Ring(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    ring_inner_radius = models.IntegerField(blank=True, null=True)
+    ring_mass = models.FloatField(blank=True, null=True)
+    ring_outer_radius = models.IntegerField(blank=True, null=True)
+    ring_type = models.ForeignKey(RingType, models.SET_NULL, blank=True, null=True)
+    related_body = models.ForeignKey(Body, models.CASCADE, blank=True, null=True)
+    semi_major_axis = models.FloatField(blank=True, null=True)
+    eddb_created_at = models.IntegerField(blank=True, null=True)
+    eddb_updated_at = models.IntegerField(blank=True, null=True)
+
+
+#  Commodity Section
+'''
+{"id":1,"name":"Explosives","category_id":1,"average_price":261,"is_rare":0,
+  "category":{"id":1,"name":"Chemicals"}},#
+ '''
+
+
+class CommodityCategory(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+
+
+class Commodity(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    category = models.ForeignKey(CommodityCategory, models.SET_NULL, blank=True, null=True)
+    average_price = models.IntegerField(blank=True, null=True)
+    is_rare = models.NullBooleanField(blank=True, null=True)   # Y N ?
+
+
+#  Stations Section
+
+
+class StationType(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+
+
+class Station(models.Model):
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, default='')
+    system = models.ForeignKey(System, models.SET_NULL, blank=True, null=True)
+    max_landing_pad_size = models.CharField(max_length=1, blank=True, default='')
+    distance_to_star = models.IntegerField(blank=True, null=True)
+    system = models.ForeignKey(System, models.SET_NULL, blank=True, null=True)
+    government = models.ForeignKey(Government, models.SET_NULL, blank=True, null=True)
+    allegiance = models.ForeignKey(Allegiance, models.SET_NULL, blank=True, null=True)
+    state = models.ForeignKey(State, models.SET_NULL, blank=True, null=True)
+    stationtype = models.ForeignKey(StationType, models.SET_NULL, blank=True, null=True)
+    has_blackmarket = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_market = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_refuel = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_repair = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_rearm = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_outfitting = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_shipyard = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_docking = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    has_commodities = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    is_planetary = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    eddb_updated_at = models.IntegerField(blank=True, null=True)
+    eddb_shipyard_updated_at = models.IntegerField(blank=True, null=True)
+    eddb_outfitting_updated_at = models.IntegerField(blank=True, null=True)
+    eddb_market_updated_at = models.IntegerField(blank=True, null=True)
+'''
+{"id":14,"name":"Bounds Hub","system_id":773,"max_landing_pad_size":"L",
+"distance_to_star":910,"faction":"Blood Brothers from Alrai",
+"government":"Democracy","allegiance":"Federation","state":"None","type_id":3,
+"type":"Coriolis Starport","has_blackmarket":0,"has_market":1,"has_refuel":1,
+"has_repair":1,"has_rearm":1,"has_outfitting":1,"has_shipyard":1,
+"has_docking":1,"has_commodities":1,
+"import_commodities":["Cobalt","Bauxite","Rutile"],
+"export_commodities":["Aluminium","Advanced Catalysers","Robotics"],
+"prohibited_commodities":["Narcotics","Tobacco","Combat Stabilisers",
+    "Imperial Slaves","Slaves","Battle Weapons","Toxic Waste"],
+"economies":["High Tech","Refinery"],"updated_at":1461414377,
+"shipyard_updated_at":1473600498,"outfitting_updated_at":1473610940,
+"market_updated_at":1473610939,"is_planetary":0,
+"selling_ships":["Adder","Cobra Mk. III","Diamondback Scout",
+    "Federal Dropship","Hauler","Python","Sidewinder Mk. I",
+    "Type-6 Transporter","Type-9 Heavy","Viper Mk III",
+    "Asp Scout","Federal Corvette","Keelback",
+    "Viper MK IV","Cobra MK IV"],
+"selling_modules":[738,739,740,741,742,748,749,750,751,752,753,754,755,756,757,
+758,759,760,761,762,763,764,765,766,etc,1549,1550]}
+'''
+
+class StationCommodity(models.Model):
+    # Buy Sell Don't bring?
+    commodity = models.ForeignKey(Commodity, models.CASCADE)
+    station = models.ForeignKey(Station, models.CASCADE)
+    imported = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    exported = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    prohibited = models.NullBooleanField(blank=True, null=True)   # Y N ?
+
+
+class StationEconomy(models.Model):
+    # Buy Sell Don't bring?
+    economy = models.ForeignKey(Economy, models.CASCADE)
+    station = models.ForeignKey(Station, models.CASCADE)
+
+
+class StationShip(models.Model):
+    # ship = models.ForeignKey(ShipType, models.CASCADE) TODO
+    station = models.ForeignKey(Station, models.CASCADE)
+
+
+class StationModule(models.Model):
+    # module = models.ForeignKey(ModuleType, models.CASCADE) TODO
+    station = models.ForeignKey(Station, models.CASCADE)
