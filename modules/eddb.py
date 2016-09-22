@@ -228,10 +228,11 @@ class Systems(object):
                         )
                 printdebug('Successfully loaded JSON: %s' % filepath)
                 # Need to reload the SystemID cache if anything changed
-                # As the bulk updater doesn't current update the cache contents
+                # As the bulk updater doesn't currently update the cache contents
+                # TODO
                 if self.systems_changed > 0:
                     printdebug('Reloading SystemID Cache')
-                    self.dbapi.cache.systemsids.refresh()
+                    self.dbapi.cache.systemids.refresh()
                 #self.data_load_process()
                 #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
                 self.loaded = True  # TODO better checks here
@@ -256,8 +257,9 @@ class Bodies(object):
         if isfile(filepath):
             printdebug('%s found. Starting to load EDDB Bodies data.' % filepath)
             self.timestart = time.clock()
-            if True:
+            if True:    # Eventually this will be a try
                 with open(filepath, 'r', encoding='utf-8') as myfile:
+                    self.dbapi.startbodybulkmode()
                     for line in myfile:
                         item = json.loads(line)
                         self.bodies_count += 1
@@ -304,6 +306,7 @@ class Bodies(object):
                                     end='')
                     myfile.close
                     #self.dbapi.create_system_bulk_flush()
+                    self.dbapi.endbodybulkmode()
                 seconds = int(time.clock() - self.timestart)
                 srate = (self.bodies_count + 1) / (seconds + 1)
                 crate = (self.bodies_changed + 1) / (seconds + 1)

@@ -46,6 +46,9 @@ from .serializers import CommodityCategorySerializer, CommoditySerializer
 from .serializers import StationTypeSerializer, StationSerializer
 from .serializers import StationCommoditySerializer, StationEconomySerializer
 from .serializers import StationShipSerializer, StationModuleSerializer
+from .serializers import AtmosCompositionBulkSerializer
+from .serializers import SolidCompositionBulkSerializer
+from .serializers import MaterialCompositionBulkSerializer
 
 
 
@@ -479,6 +482,24 @@ class AtmosCompositionViewSet(viewsets.ModelViewSet):
     serializer_class = AtmosCompositionSerializer
 
 
+class AtmosCompositionBulkViewSet(BulkModelViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = AtmosComposition.objects.all()
+    serializer_class = AtmosCompositionBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+    # Make the whole create atomic
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        # return self.create(request, *args, **kwargs)
+        return super(AtmosCompositionBulkViewSet,
+                     self).post(self, request, *args, **kwargs)
+
+
 class BodyGroupViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
@@ -543,12 +564,48 @@ class SolidCompositionViewSet(viewsets.ModelViewSet):
     serializer_class = SolidCompositionSerializer
 
 
+class SolidCompositionBulkViewSet(BulkModelViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = SolidComposition.objects.all()
+    serializer_class = SolidCompositionBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+    # Make the whole create atomic
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        # return self.create(request, *args, **kwargs)
+        return super(SolidCompositionBulkViewSet,
+                     self).post(self, request, *args, **kwargs)
+
+
 class MaterialCompositionViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
     """
     queryset = MaterialComposition.objects.all()
     serializer_class = MaterialCompositionSerializer
+
+
+class MaterialCompositionBulkViewSet(BulkModelViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = MaterialComposition.objects.all()
+    serializer_class = MaterialCompositionBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+    # Make the whole create atomic
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        # return self.create(request, *args, **kwargs)
+        return super(MaterialCompositionBulkViewSet,
+                     self).post(self, request, *args, **kwargs)
 
 
 class RingViewSet(viewsets.ModelViewSet):

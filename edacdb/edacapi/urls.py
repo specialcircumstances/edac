@@ -47,7 +47,13 @@ router.register(r'stationsmodules', views.StationModuleViewSet)
 bulkrouter = BulkRouter(schema_title='EDACD API Bulk Schema', schema_url='./bulk/')
 bulkrouter.register(r'systems', views.SystemBulkViewSet, 'bulksys')
 bulkrouter.register(r'factions', views.FactionBulkViewSet, 'bulkfact')
-
+bulkrouter.register(r'atmoscomposition',
+                    views.AtmosCompositionBulkViewSet, 'bulkatmoscomposition')
+bulkrouter.register(r'solidcomposition',
+                    views.SolidCompositionBulkViewSet, 'bulksolidcomposition')
+bulkrouter.register(r'materialcomposition',
+                    views.MaterialCompositionBulkViewSet,
+                    'bulkmaterialcomposition')
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.

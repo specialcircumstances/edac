@@ -195,6 +195,13 @@ class AtmosCompositionSerializer(serializers.ModelSerializer):
         model = AtmosComposition
 
 
+class AtmosCompositionBulkSerializer(BulkSerializerMixin,
+                                     serializers.ModelSerializer):
+    class Meta:
+        model = AtmosComposition
+        list_serializer_class = BulkListSerializer
+
+
 class BodyGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = BodyGroup
@@ -235,9 +242,23 @@ class SolidCompositionSerializer(serializers.ModelSerializer):
         model = SolidComposition
 
 
+class SolidCompositionBulkSerializer(BulkSerializerMixin,
+                                     serializers.ModelSerializer):
+    class Meta:
+        model = SolidComposition
+        list_serializer_class = BulkListSerializer
+
+
 class MaterialCompositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = MaterialComposition
+
+
+class MaterialCompositionBulkSerializer(BulkSerializerMixin,
+                                        serializers.ModelSerializer):
+    class Meta:
+        model = MaterialComposition
+        list_serializer_class = BulkListSerializer
 
 
 class RingSerializer(serializers.ModelSerializer):

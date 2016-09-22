@@ -417,7 +417,7 @@ class MaterialComposition(models.Model):
 
 class Ring(models.Model):
     eddbid = models.IntegerField(unique=True, blank=True, null=True)
-    name = models.CharField(max_length=64, blank=True, default='')
+    name = models.CharField(max_length=96, blank=True, default='')
     ring_inner_radius = models.IntegerField(blank=True, null=True)
     ring_mass = models.FloatField(blank=True, null=True)
     ring_outer_radius = models.IntegerField(blank=True, null=True)
@@ -426,6 +426,7 @@ class Ring(models.Model):
     semi_major_axis = models.FloatField(blank=True, null=True)
     eddb_created_at = models.IntegerField(blank=True, null=True)
     eddb_updated_at = models.IntegerField(blank=True, null=True)
+    duphash = models.CharField(max_length=8, blank=True, default='')
 
 
 #  Commodity Section
