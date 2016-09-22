@@ -266,6 +266,13 @@ class RingSerializer(serializers.ModelSerializer):
         model = Ring
 
 
+class RingBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = Ring
+        list_serializer_class = BulkListSerializer
+
+
 class CommodityCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = CommodityCategory

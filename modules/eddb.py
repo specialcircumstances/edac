@@ -330,7 +330,7 @@ if __name__ == '__main__':
     #import_listings()
     #print('Listings count is: %d' % listings_count)
     dbapi = EDACDB()
-    mysystems = Systems(dbapi)
+    #mysystems = Systems(dbapi)
     mybodies = Bodies(dbapi)
     #print(mysystems.lastsystem)
     #print(mysystems.types)

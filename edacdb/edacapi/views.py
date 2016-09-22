@@ -1,6 +1,7 @@
 import time
 
 from django.shortcuts import render
+from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db import IntegrityError, OperationalError
 from django.http import HttpResponse
@@ -21,6 +22,7 @@ from .models import MaterialComposition, Ring, CommodityCategory, Commodity
 from .models import StationType, Station, StationCommodity, StationEconomy
 from .models import StationShip, StationModule
 from rest_framework import viewsets, views
+from rest_framework import status
 from rest_framework_bulk import BulkModelViewSet
 from rest_framework.response import Response
 from rest_framework.renderers import JSONRenderer
@@ -49,9 +51,44 @@ from .serializers import StationShipSerializer, StationModuleSerializer
 from .serializers import AtmosCompositionBulkSerializer
 from .serializers import SolidCompositionBulkSerializer
 from .serializers import MaterialCompositionBulkSerializer
+from .serializers import RingBulkSerializer
 
 
 
+class UpdatingBulkViewSet(BulkModelViewSet):
+    """
+    API endpoint that allows things to be bulk created or updated.
+    """
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
+    def bulk_update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        # restrict the update to the filtered queryset
+        serializer = self.get_serializer(
+            self.filter_queryset(self.get_queryset()),
+            data=request.data,
+            many=True,
+            partial=partial,
+        )
+        validated_data = []
+        validation_errors = []
+        results = []
+        for item in request.data:
+            item_serializer = self.get_serializer(
+                get_object_or_404(self.filter_queryset(self.get_queryset()), pk=item['id']),
+                data=item,
+                partial=partial,
+            )
+            if not item_serializer.is_valid():
+                validation_errors.append(item_serializer.errors)
+            result = self.get_queryset().filter(id=item['id']).update(**item_serializer.validated_data)
+            results.append(result)
+        if validation_errors:
+            raise ValidationError(validation_errors)
+        return Response(results, status=status.HTTP_200_OK)
 
 
 
@@ -409,7 +446,7 @@ class FactionViewSet(viewsets.ModelViewSet):
     serializer_class = FactionSerializer
 
 
-class FactionBulkViewSet(BulkModelViewSet):
+class FactionBulkViewSet(UpdatingBulkViewSet):
     """
     API endpoint that allows Factions to be bulk viewed or edited.
     """
@@ -418,12 +455,6 @@ class FactionBulkViewSet(BulkModelViewSet):
     renderer_classes = (CBORRenderer, )
     parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
-
-    # Make the whole create atomic
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        # return self.create(request, *args, **kwargs)
-        return super(FactionBulkViewSet, self).post(self, request, *args, **kwargs)
 
 
 class PowerViewSet(viewsets.ModelViewSet):
@@ -482,7 +513,7 @@ class AtmosCompositionViewSet(viewsets.ModelViewSet):
     serializer_class = AtmosCompositionSerializer
 
 
-class AtmosCompositionBulkViewSet(BulkModelViewSet):
+class AtmosCompositionBulkViewSet(UpdatingBulkViewSet):
     """
     API endpoint that allows Factions to be bulk viewed or edited.
     """
@@ -491,13 +522,6 @@ class AtmosCompositionBulkViewSet(BulkModelViewSet):
     renderer_classes = (CBORRenderer, )
     parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
-
-    # Make the whole create atomic
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        # return self.create(request, *args, **kwargs)
-        return super(AtmosCompositionBulkViewSet,
-                     self).post(self, request, *args, **kwargs)
 
 
 class BodyGroupViewSet(viewsets.ModelViewSet):
@@ -564,7 +588,7 @@ class SolidCompositionViewSet(viewsets.ModelViewSet):
     serializer_class = SolidCompositionSerializer
 
 
-class SolidCompositionBulkViewSet(BulkModelViewSet):
+class SolidCompositionBulkViewSet(UpdatingBulkViewSet):
     """
     API endpoint that allows Factions to be bulk viewed or edited.
     """
@@ -574,12 +598,6 @@ class SolidCompositionBulkViewSet(BulkModelViewSet):
     parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
 
-    # Make the whole create atomic
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        # return self.create(request, *args, **kwargs)
-        return super(SolidCompositionBulkViewSet,
-                     self).post(self, request, *args, **kwargs)
 
 
 class MaterialCompositionViewSet(viewsets.ModelViewSet):
@@ -590,7 +608,7 @@ class MaterialCompositionViewSet(viewsets.ModelViewSet):
     serializer_class = MaterialCompositionSerializer
 
 
-class MaterialCompositionBulkViewSet(BulkModelViewSet):
+class MaterialCompositionBulkViewSet(UpdatingBulkViewSet):
     """
     API endpoint that allows Factions to be bulk viewed or edited.
     """
@@ -600,13 +618,6 @@ class MaterialCompositionBulkViewSet(BulkModelViewSet):
     parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
 
-    # Make the whole create atomic
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        # return self.create(request, *args, **kwargs)
-        return super(MaterialCompositionBulkViewSet,
-                     self).post(self, request, *args, **kwargs)
-
 
 class RingViewSet(viewsets.ModelViewSet):
     """
@@ -614,6 +625,17 @@ class RingViewSet(viewsets.ModelViewSet):
     """
     queryset = Ring.objects.all()
     serializer_class = RingSerializer
+
+
+class RingBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = Ring.objects.all()
+    serializer_class = RingBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
 
 
 class CommodityCategoryViewSet(viewsets.ModelViewSet):
