@@ -237,6 +237,13 @@ class BodySerializer(serializers.ModelSerializer):
         model = Body
 
 
+class BodyBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = Body
+        list_serializer_class = BulkListSerializer
+
+
 class SolidCompositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = SolidComposition

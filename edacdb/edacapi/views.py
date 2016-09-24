@@ -51,7 +51,7 @@ from .serializers import StationShipSerializer, StationModuleSerializer
 from .serializers import AtmosCompositionBulkSerializer
 from .serializers import SolidCompositionBulkSerializer
 from .serializers import MaterialCompositionBulkSerializer
-from .serializers import RingBulkSerializer
+from .serializers import RingBulkSerializer, BodyBulkSerializer
 
 
 
@@ -578,6 +578,17 @@ class BodyViewSet(viewsets.ModelViewSet):
     """
     queryset = Body.objects.all()
     serializer_class = BodySerializer
+
+
+class BodyBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = Body.objects.all()
+    serializer_class = BodyBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
 
 
 class SolidCompositionViewSet(viewsets.ModelViewSet):

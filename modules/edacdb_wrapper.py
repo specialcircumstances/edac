@@ -48,6 +48,7 @@ def printerror(mystring):
 class CompositionBulkUpdateProcess(Process):
     # Based on https://pymotw.com/2/multiprocessing/communication.html
     # Also supports rings (HashedItemCache)
+    # and bodies (BodyCache)
     def __init__(self, bulkapi, mylist, task_queue, result_queue):
         Process.__init__(self)
         self.slumapi = slumber.API(bulkapi['url'],
@@ -81,17 +82,15 @@ class CompositionBulkUpdateProcess(Process):
                 content = next_task.pop('content')
                 if jobmode == 'create':
                     if jobtype == 'atmoscomposition':
-                        result = self.slumapi.atmoscomposition.post(
-                                    content)
+                        result = self.slumapi.atmoscomposition.post(content)
                     elif jobtype == 'materialcomposition':
-                        result = self.slumapi.materialcomposition.post(
-                                    content)
+                        result = self.slumapi.materialcomposition.post(content)
                     elif jobtype == 'solidcomposition':
-                        result = self.slumapi.solidcomposition.post(
-                                    content)
+                        result = self.slumapi.solidcomposition.post(content)
                     elif jobtype == 'rings':
-                        result = self.slumapi.rings.post(
-                                    content)
+                        result = self.slumapi.rings.post(content)
+                    elif jobtype == 'bodies':
+                        result = self.slumapi.bodies.post(content)
                 elif jobmode == 'update':
                     if jobtype == 'atmoscomposition':
                         result = self.slumapi.atmoscomposition.put(content)
@@ -100,8 +99,9 @@ class CompositionBulkUpdateProcess(Process):
                     elif jobtype == 'solidcomposition':
                         result = self.slumapi.solidcomposition.put(content)
                     elif jobtype == 'rings':
-                        # myid = content.pop('pk')
                         result = self.slumapi.rings.put(content)
+                    elif jobtype == 'bodies':
+                        result = self.slumapi.bodies.put(content)
                 else:
                     printerror('Composition Bulk Updater - Unknown Target')
                     result = 0
@@ -110,7 +110,7 @@ class CompositionBulkUpdateProcess(Process):
                 printerror('Error in %s for %s' % (proc_name, self.mylist))
                 printerror(exc)
                 print("Unexpected error:", sys.exc_info()[0])
-                printerror(content)
+                # printerror(content)
                 raise
             finally:
                 self.task_queue.task_done()
@@ -436,6 +436,10 @@ class SysIDCache(object):
         cbor to massively reduce the time it take to get a fresh copy
         of the SysID cache.
         '''
+        # clear the boards...
+        self.eddb = {}
+        self.edsm = {}
+        self.duphash = {}
         gc.collect()            # some items can be large
         bulkapi = self.bulkapi
         slumapi = slumber.API(bulkapi['url'],
@@ -461,13 +465,16 @@ class SysIDCache(object):
         idsprocessed = 0
         # Optimisation
         # Precreate dicts using sets
-        eddbset = set([item['eddbid'] for item in mylist])
-        edsmset = set([item['edsmid'] for item in mylist])
-        duphashset = set([item['duphash'] for item in mylist])
         # What I want are several lookup dictionaries
+        eddbset = set([item['eddbid'] for item in mylist])
         self.eddb = dict.fromkeys(eddbset)  # Find by eddb
+        del eddbset
+        edsmset = set([item['edsmid'] for item in mylist])
         self.edsm = dict.fromkeys(edsmset)  # Find by edsm
+        del edsmset
+        duphashset = set([item['pk'] for item in mylist])
         self.duphash = dict.fromkeys(duphashset)   # Check if update required
+        del duphashset
         printdebug('Populating lookup dicts')
         self.timestart = time.time()
         if len(mylist) > 0:
@@ -595,7 +602,30 @@ class SysIDCache(object):
 
 
 class BodyCache(object):
-    #
+
+    # This could probably be refactored alongside Composition Cache
+    def addtobulkupdate(self, composition, mode):
+        if mode not in self.bulklist:
+            self.bulklist[mode] = []
+        if mode not in self.bulkcount:
+            self.bulkcount[mode] = 0
+        self.bulklist[mode].append(composition)
+        self.bulkcount[mode] += 1
+        if self.bulkcount[mode] > 1000:
+            # This hands in bulk to other process via queue
+            # wrap up in dict to indicate target in API
+            mydict = {}
+            mydict['content'] = self.bulklist[mode]
+            mydict['jobtype'] = self.mylist
+            mydict['jobmode'] = mode
+            self.bulkqueue.put(mydict)
+            self.bulklist[mode] = []
+            self.bulkcount[mode] = 0
+            while self.bulkqueue.qsize() > self.bulkprocesses:
+                # no point letting the queue get too big
+                # This blocks
+                time.sleep(0.1)
+            # TODO update cache
 
     def addtocache(self, newsys):
         # We send pk but get id! grrr
@@ -618,12 +648,16 @@ class BodyCache(object):
                         dbid = self.edsm[body['edsmid']]
         if dbid is None:
             try:
-                newitem = self.client.action(
-                                self.schema,
-                                [self.mylist, 'create'],
-                                params=body)
-                self.addtocache(newitem)
-                return newitem['pk']
+                if self.bulkmode is True:
+                    self.addtobulkupdate(body, 'create')
+                    return None
+                else:
+                    newitem = self.client.action(
+                                    self.schema,
+                                    [self.mylist, 'create'],
+                                    params=body)
+                    self.addtocache(newitem)
+                    return newitem['pk']
             except Exception as e:
                 print('Exception in Body FoA create.')
                 print(str(e))
@@ -634,17 +668,70 @@ class BodyCache(object):
             if self.duphash[dbid] != body['duphash']:
                 body['pk'] = dbid
                 try:        # TODO make a bulk updater?
-                    newitem = self.client.action(self.schema,
-                                                [self.mylist, 'update'],
-                                                params=body)
-                    self.addtocache(newitem)    # to update duphash
+                    if self.bulkmode is True:
+                        body['id'] = body.pop('pk')   # ANNOYING!
+                        self.addtobulkupdate(body, 'update')
+                        return None
+                    else:
+                        newitem = self.client.action(self.schema,
+                                                    [self.mylist, 'update'],
+                                                    params=body)
+                        self.addtocache(newitem)    # to update duphash
                 except Exception as e:
-                    print('Exception in Body FoA update.')
-                    print(str(e))
-                    print(body)
+                    printdebug('Exception in Body FoA update.')
+                    printdebug(str(e))
+                    printdebug(body)
                 return dbid
             else:
                 return dbid
+
+    def startbulkmode(self):
+        # Start Bulk Upload processes
+        if self.bulkmode is False:
+            self.bulklist = {}  # Dict for different batch types
+            self.bulkcount = {}
+            self.bulkqueue = JoinableQueue()
+            self.resultqueue = Queue()
+            self.bulkprocesses = 2
+            self.bulkprocess = {}
+            # Create processes
+            for myid in range(0, self.bulkprocesses):
+                self.bulkprocess[myid] = CompositionBulkUpdateProcess(
+                                            self.bulkapi,
+                                            self.mylist,
+                                            self.bulkqueue,
+                                            self.resultqueue)
+                self.bulkprocess[myid].start()
+            self.bulkmode = True
+        else:
+            printerror('Body Cache %s Bulkmode already enabled'
+                       % self.mylist)
+
+    def endbulkmode(self):
+        # Start Bulk Upload processes
+        if self.bulkmode is True:
+            for mode in self.bulklist:
+                mydict = {}
+                mydict['content'] = self.bulklist[mode]
+                mydict['jobtype'] = self.mylist
+                mydict['jobmode'] = mode
+                self.bulkqueue.put(mydict)
+            for myid in range(0, self.bulkprocesses):
+                self.bulkqueue.put(None)
+            self.bulkqueue.close()
+            printdebug('Body Cache: Queuing complete. Waiting for DB commit.')
+            self.bulkqueue.join()
+            while self.resultqueue.empty() is not True:
+                garbage = self.resultqueue.get()
+            printdebug('Body Cache: DB committed.')
+            for myid in range(0, self.bulkprocesses):
+                self.bulkprocess[myid].join()
+            printdebug('Flushed Body Cache Bulk Update Process.')
+            self.bulkmode = False
+            self.refresh()
+        else:
+            printerror('Body Cache %s Bulkmode not running.'
+                       % self.mylist)
 
     def refresh(self):
         mylist = self.client.action(self.schema, [self.mylist, 'list'])
@@ -673,11 +760,13 @@ class BodyCache(object):
             offset += limit
         # self.items = mydict
 
-    def __init__(self, client, schema, mylist):
+    def __init__(self, client, schema, bulkapi, mylist):
         printdebug('Loading %s Cache' % mylist)
         self.client = client
         self.schema = schema
         self.mylist = mylist
+        self.bulkapi = bulkapi
+        self.bulkmode = False
         self.eddb = {}
         self.edsm = {}
         self.duphash = {}
@@ -733,6 +822,8 @@ class CompositionCache(object):
             printerror('Composition Cache needs a dict please.')
             return None
         body = indict['related_body']
+        if body is None:
+            return None
         comp = indict['component']
         share = indict['share']
         action = 'create'
@@ -751,7 +842,8 @@ class CompositionCache(object):
             myparams['pk'] = self.items[body][comp]['id']
         try:
             if self.bulkmode is True:
-                myparams['id'] = myparams.pop('pk')   # ANNOYING!
+                if action == 'update':
+                    myparams['id'] = myparams.pop('pk')   # ANNOYING!
                 self.addtobulkupdate(myparams, action)
                 return None
             else:
@@ -768,7 +860,7 @@ class CompositionCache(object):
                 self.items[body][comp] = {'share': share, 'id': pk}
                 return self.items[body][comp]['id']
         except Exception as e:
-            printerror('Exception in Component Cache FoA')
+            printerror('Exception in %s Composition Cache FoA' % self.mylist)
             printerror(str(e))
             printerror(myparams)
             return None
@@ -1142,14 +1234,17 @@ class DBCache(object):
         self.volcanismtypes = ItemCache(client, schema, 'volcanismtypes')
         self.ringtypes = ItemCache(client, schema, 'ringtypes')
         self.rings = HashedItemCache(client, schema, bulkapi, 'rings')
-        self.bodies = BodyCache(client, schema, 'bodies')
+        self.bodies = BodyCache(client, schema, bulkapi, 'bodies')
         self.solidtypes = ItemCache(client, schema, 'solidtypes')
         self.materials = ItemCache(client, schema, 'materials')
         # Composition Caches
         self.atmoscomposition = CompositionCache(client, schema, bulkapi, 'atmoscomposition')
         self.solidcomposition = CompositionCache(client, schema, bulkapi, 'solidcomposition')
         self.materialcomposition = CompositionCache(client, schema, bulkapi, 'materialcomposition')
-
+        # Station related
+        self.commoditycats = ItemCache(client, schema, 'commoditycats')
+        self.commodities = HashedItemCache(client, schema, bulkapi, 'commodities')
+        self.stationtypes = ItemCache(client, schema, 'stationtypes')
 
 
 
@@ -1174,17 +1269,90 @@ class EDACDB(object):
         #return hashlib.md5(data).hexdigest()[0:15]
         #b'iMjj8tMyETkJqEszZ-dZJQ=='
 
+    def create_eddb_commodity_in_db(self, commodity):
+        '''
+        {"id":4,"name":"Pesticides","category_id":1,
+        "average_price":241,"is_rare":0,
+        "category":{"id":1,"name":"Chemicals"}},
+        ------->
+        {"eddbid":4,"eddbname":"Pesticides","category":X,
+        "average_price":241,"is_rare":0, "duphash": 'skjfdhjd'},
+        '''
+        # Eddb loader will replace id with eddbid
+        # and name with eddbname
+        commodity['category'] = self.cache.commoditycats.findoradd(
+                                {'eddbid': commodity['category']['id'],
+                                 'name': commodity['category']['name']
+                                 })
+        commodity.pop('category_id')    # no longer required
+        hashdata = ""
+        for key in sorted(commodity.keys()):
+            hashdata += str(commodity[key])
+        commodity['duphash'] = self.duphash(hashdata)
+        result = self.cache.commodities.findoradd(commodity)
+
+
+    def create_eddb_station_in_db(self, station):
+        # Based on info from EDDB create or update a Station in DB
+        #
+        # Forign keys are system, faction, government, allegiance
+        # state, stationtype
+        if self.cache.systemids.eddbidexists(station['system_id']) is False:
+            printerror('EDDB System ID (%d) is unknown in EDDB Station import.'
+                       % station['system_id'])
+            return False
+        station['system'] = self.cache.systemids.getpkfromeddbid(station['system_id'])
+        station.pop('system_id')
+        # Do our lookups
+        station['faction'] = self.cache.factions.findoradd(station['faction'])
+        station['government'] = self.cache.governments.findoradd(station['government'])
+        station['allegiance'] = self.cache.allegiances.findoradd(station['allegiance'])
+        station['state'] = self.cache.sysstates.findoradd(station['state'])
+        station['stationtype'] = self.cache.sysstates.findoradd(station['stationtype'])
+        # Pop any lists we need seperated
+        imports = station.pop('import_commodities')
+        exports = station.pop('export_commodities')
+        prohibited = station.pop('prohibited_commodities')
+        economies = station.pop('economies')
+        selling_ships = station.pop('selling_ships')
+        selling_modules = station.pop('selling_modules')
+        #
+        # TODO findoradd station
+        newstationid = findoradd
+        # Make commodities                  # For new stations will require 2nd
+                                            # run
+        if newstationid is not None:        # Allow for bulk station creation
+            stationcommodities = []
+            for ctype in [imports, exports, prohibited]:
+                for commodity in ctype:             # Commodity must exist!
+                    commodityid = self.cache.commodities.findbyeddbname(commodity)
+                    if commodityid is not None:
+                        comdict = {
+                            'commodity': commodityid,
+                            'station': newstationid,
+                            'imported': commodity in imports,
+                            'exported': commodity in exports,
+                            'prohibited': commodity in prohibited,
+                        }
+                        stationcommodities.append(comdict)
+            # s.c. findoradd must replace all or none per station
+            result = self.cache.stationcommodities.findoradd(stationcommodities)
+            # Add economy joins
+            #for economy in
+
     def startbodybulkmode(self):
         self.cache.atmoscomposition.startbulkmode()
         self.cache.solidcomposition.startbulkmode()
         self.cache.materialcomposition.startbulkmode()
         self.cache.rings.startbulkmode()
+        self.cache.bodies.startbulkmode()
 
     def endbodybulkmode(self):
         self.cache.atmoscomposition.endbulkmode()
         self.cache.solidcomposition.endbulkmode()
         self.cache.materialcomposition.endbulkmode()
         self.cache.rings.endbulkmode()
+        self.cache.bodies.endbulkmode()
 
     def create_eddb_body_in_db(self, body):
         # find or add will add to db if necessary and refresh
@@ -1280,54 +1448,53 @@ class EDACDB(object):
         # print('Body ID: %d' % newitemid)
         # Now we have a reference ID for the system we can update the
         # Composition tables
-        if len(atmoscomposition) > 0:
-            # Ensure all the components exist
-            for component in atmoscomposition:
-                self.cache.atmoscomposition.findoradd({
-                    'component': component['atmosphere_component_id'],
-                    'related_body': newitemid,
-                    'share': component['share']
-                })
-        #
-        if len(solidcomposition) > 0:
-            # Ensure all the components exist
-            for component in solidcomposition:
-                self.cache.solidcomposition.findoradd({
-                    'component': component['solid_component_id'],
-                    'related_body': newitemid,
-                    'share': component['share']
-                })
-        #
-        if len(materials) > 0:
-            # Ensure all the components exist
-            for component in materials:
-                self.cache.materialcomposition.findoradd({
-                    'component': component['material_id'],
-                    'related_body': newitemid,
-                    'share': component['share']
-                })
-        #
-        if len(rings) > 0:
-            # Ensure all the components exist
-            '''
-            "rings":[{"id":23,"created_at":1466612897,"updated_at":1466612897,
-                "name":"D Ring","semi_major_axis":0,"ring_type_id":1,
-                "ring_mass":250560.2,"ring_inner_radius":74500,
-                "ring_outer_radius":140180,"ring_type_name":"Icy"}]
-            '''
-            for ring in rings:
-                ring['eddbid'] = ring.pop('id')
-                ring['eddb_created_at'] = ring.pop('created_at')
-                ring['eddb_updated_at'] = ring.pop('updated_at')
-                ring['related_body'] = newitemid
-                hashdata = ""
-                for key in sorted(ring.keys()):
-                    hashdata += str(ring[key])
-                ring['duphash'] = self.duphash(hashdata)
-                result = self.cache.rings.findoradd(ring)
-
-        #
-
+        # Skip these if newitemid is None (probably a bulk operation)
+        if newitemid is not None:
+            if len(atmoscomposition) > 0:
+                # Ensure all the components exist
+                for component in atmoscomposition:
+                    self.cache.atmoscomposition.findoradd({
+                        'component': component['atmosphere_component_id'],
+                        'related_body': newitemid,
+                        'share': component['share']
+                    })
+            #
+            if len(solidcomposition) > 0:
+                # Ensure all the components exist
+                for component in solidcomposition:
+                    self.cache.solidcomposition.findoradd({
+                        'component': component['solid_component_id'],
+                        'related_body': newitemid,
+                        'share': component['share']
+                    })
+            #
+            if len(materials) > 0:
+                # Ensure all the components exist
+                for component in materials:
+                    self.cache.materialcomposition.findoradd({
+                        'component': component['material_id'],
+                        'related_body': newitemid,
+                        'share': component['share']
+                    })
+            #
+            if len(rings) > 0:
+                # Ensure all the components exist
+                '''
+                "rings":[{"id":23,"created_at":1466612897,"updated_at":1466612897,
+                    "name":"D Ring","semi_major_axis":0,"ring_type_id":1,
+                    "ring_mass":250560.2,"ring_inner_radius":74500,
+                    "ring_outer_radius":140180,"ring_type_name":"Icy"}]
+                '''
+                for ring in rings:
+                    ring['eddbid'] = ring.pop('id')
+                    ring['eddb_created_at'] = ring.pop('created_at')
+                    ring['eddb_updated_at'] = ring.pop('updated_at')
+                    ring['related_body'] = newitemid
+                    hashdata = ""
+                    for key in sorted(ring.keys()):
+                        hashdata += str(ring[key])
+                    ring['duphash'] = self.duphash(hashdata)
+                    result = self.cache.rings.findoradd(ring)
 
 
     def create_system_in_db(self, system):

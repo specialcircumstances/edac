@@ -444,9 +444,11 @@ class CommodityCategory(models.Model):
 class Commodity(models.Model):
     eddbid = models.IntegerField(unique=True, blank=True, null=True)
     name = models.CharField(max_length=64, blank=True, default='')
+    eddbname = models.CharField(max_length=64, blank=True, default='')
     category = models.ForeignKey(CommodityCategory, models.SET_NULL, blank=True, null=True)
     average_price = models.IntegerField(blank=True, null=True)
     is_rare = models.NullBooleanField(blank=True, null=True)   # Y N ?
+    duphash = models.CharField(max_length=8, blank=True, default='')
 
 
 #  Stations Section
@@ -463,7 +465,7 @@ class Station(models.Model):
     system = models.ForeignKey(System, models.SET_NULL, blank=True, null=True)
     max_landing_pad_size = models.CharField(max_length=1, blank=True, default='')
     distance_to_star = models.IntegerField(blank=True, null=True)
-    system = models.ForeignKey(System, models.SET_NULL, blank=True, null=True)
+    faction = models.ForeignKey(Faction, models.SET_NULL, blank=True, null=True)
     government = models.ForeignKey(Government, models.SET_NULL, blank=True, null=True)
     allegiance = models.ForeignKey(Allegiance, models.SET_NULL, blank=True, null=True)
     state = models.ForeignKey(State, models.SET_NULL, blank=True, null=True)

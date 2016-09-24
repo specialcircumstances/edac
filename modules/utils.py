@@ -17,7 +17,7 @@ from gzip import GzipFile
 bodiesurl = "https://eddb.io/archive/v4/bodies.jsonl"
 bodiesfile = "modules\eddb-data\\bodies.jsonl"
 commodiesurl = "https://eddb.io/archive/v4/commodities.json"
-commodiesfile = 'modules\eddb-data\commodies.json'
+commodiesfile = 'modules\eddb-data\commodities.json'
 listingurl = "https://eddb.io/archive/v4/listings.csv"
 listingsfile = 'modules\eddb-data\listings.csv'
 modulesurl = "https://eddb.io/archive/v4/modules.json"

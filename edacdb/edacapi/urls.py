@@ -54,9 +54,9 @@ bulkrouter.register(r'solidcomposition',
 bulkrouter.register(r'materialcomposition',
                     views.MaterialCompositionBulkViewSet,
                     'bulkmaterialcomposition')
-bulkrouter.register(r'rings',
-                    views.RingBulkViewSet,
-                    'bulkrings')
+bulkrouter.register(r'rings', views.RingBulkViewSet, 'bulkrings')
+bulkrouter.register(r'bodies', views.BodyBulkViewSet, 'bulkbodies')
+
 
 
 # Wire up our API using automatic URL routing.

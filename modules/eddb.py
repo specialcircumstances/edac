@@ -20,7 +20,7 @@ except:
 # These files should be from
 # https://github.com/EDCD/FDevIDs
 bodiesfile = 'modules\eddb-data\\bodies.jsonl'
-commodiesfile = 'modules\eddb-data\commodies.json'
+commoditiesfile = 'modules\eddb-data\commodities.json'
 listingsfile = 'modules\eddb-data\listings.csv'
 modulesfile = 'modules\eddb-data\modules.json'
 stationsfile = 'modules\eddb-data\stations.json'
@@ -258,55 +258,56 @@ class Bodies(object):
             printdebug('%s found. Starting to load EDDB Bodies data.' % filepath)
             self.timestart = time.clock()
             if True:    # Eventually this will be a try
-                with open(filepath, 'r', encoding='utf-8') as myfile:
-                    self.dbapi.startbodybulkmode()
-                    for line in myfile:
-                        item = json.loads(line)
-                        self.bodies_count += 1
-                        # Tidy up fields to match DB
-                        # print(item)
-                        item['eddbid'] = item.pop('id')
-                        item['eddb_created_at'] = item.pop('created_at')
-                        item['eddb_updated_at'] = item.pop('updated_at')
-                        # These are Ints for me
-                        if item['catalogue_hd_id'] == '':
-                            item['catalogue_hd_id'] = None
-                        elif type(item['catalogue_hd_id']) is str:
-                            item['catalogue_hd_id'] = int(item['catalogue_hd_id'].replace(',', '').replace('.', ''))
-                        #
-                        if item['catalogue_hipp_id'] == '':
-                            item['catalogue_hipp_id'] = None
-                        elif type(item['catalogue_hipp_id']) is str:
-                            item['catalogue_hipp_id'] = int(item['catalogue_hipp_id'].replace(',', '').replace('.', ''))
-                        # str cannot be Null in DB
-                        if item['catalogue_gliese_id'] is None:
-                            item['catalogue_gliese_id'] = ''
-                        # str cannot be Null in DB
-                        if item['luminosity_sub_class'] is None:
-                            item['luminosity_sub_class'] = ''
-                        # str cannot be Null in DB
-                        if item['full_spectral_class'] is None:
-                            item['full_spectral_class'] = ''
-                        # str cannot be Null in DB
-                        if item['luminosity_class'] is None:
-                            item['luminosity_class'] = ''
-                        # str cannot be Null in DB
-                        if item['spectral_class'] is None:
-                            item['spectral_class'] = ''
-                        #
-                        if self.dbapi.create_eddb_body_in_db(item) is True:
-                            self.systems_changed += 1
-                        if self.bodies_changed % 100 == 0:
-                            seconds = int(time.clock() - self.timestart)
-                            srate = (self.bodies_count + 1) / (seconds + 1)
-                            crate = (self.bodies_changed + 1) / (seconds + 1)
-                            print('Read %d bodies (%d/s), changed %d(%d/s)              \r' % (
-                                    self.bodies_count, srate,
-                                    self.bodies_changed, crate),
-                                    end='')
-                    myfile.close
-                    #self.dbapi.create_system_bulk_flush()
-                    self.dbapi.endbodybulkmode()
+                for x in range(0, 2):    # Two passes to enable bulk methods
+                    with open(filepath, 'r', encoding='utf-8') as myfile:
+                        self.dbapi.startbodybulkmode()
+                        for line in myfile:
+                            item = json.loads(line)
+                            self.bodies_count += 1
+                            # Tidy up fields to match DB
+                            # print(item)
+                            item['eddbid'] = item.pop('id')
+                            item['eddb_created_at'] = item.pop('created_at')
+                            item['eddb_updated_at'] = item.pop('updated_at')
+                            # These are Ints for me
+                            if item['catalogue_hd_id'] == '':
+                                item['catalogue_hd_id'] = None
+                            elif type(item['catalogue_hd_id']) is str:
+                                item['catalogue_hd_id'] = int(item['catalogue_hd_id'].replace(',', '').replace('.', ''))
+                            #
+                            if item['catalogue_hipp_id'] == '':
+                                item['catalogue_hipp_id'] = None
+                            elif type(item['catalogue_hipp_id']) is str:
+                                item['catalogue_hipp_id'] = int(item['catalogue_hipp_id'].replace(',', '').replace('.', ''))
+                            # str cannot be Null in DB
+                            if item['catalogue_gliese_id'] is None:
+                                item['catalogue_gliese_id'] = ''
+                            # str cannot be Null in DB
+                            if item['luminosity_sub_class'] is None:
+                                item['luminosity_sub_class'] = ''
+                            # str cannot be Null in DB
+                            if item['full_spectral_class'] is None:
+                                item['full_spectral_class'] = ''
+                            # str cannot be Null in DB
+                            if item['luminosity_class'] is None:
+                                item['luminosity_class'] = ''
+                            # str cannot be Null in DB
+                            if item['spectral_class'] is None:
+                                item['spectral_class'] = ''
+                            #
+                            if self.dbapi.create_eddb_body_in_db(item) is True:
+                                self.bodies_changed += 1
+                            if self.bodies_changed % 100 == 0:
+                                seconds = int(time.clock() - self.timestart)
+                                srate = (self.bodies_count + 1) / (seconds + 1)
+                                crate = (self.bodies_changed + 1) / (seconds + 1)
+                                print('Read %d bodies (%d/s), changed %d(%d/s)              \r' % (
+                                        self.bodies_count, srate,
+                                        self.bodies_changed, crate),
+                                        end='')
+                        myfile.close
+                        #self.dbapi.create_system_bulk_flush()
+                        self.dbapi.endbodybulkmode()
                 seconds = int(time.clock() - self.timestart)
                 srate = (self.bodies_count + 1) / (seconds + 1)
                 crate = (self.bodies_changed + 1) / (seconds + 1)
@@ -325,13 +326,72 @@ class Bodies(object):
             printerror('%s not found. Cannot load EDDB Bodies data.' % filepath)
 
 
+class Commodities(object):
+
+    def __init__(self, dbapi, filepath=commoditiesfile):
+        # Well, we need to open the filepath
+        if type(dbapi) is not EDACDB:
+            printerror('dbapi must be of type EDACDB()')
+            return False
+        self.commodities = {}
+        self.commodities_count = 0
+        self.commodities_changed = 0
+        self.types = {}
+        self.dbapi = dbapi
+        if isfile(filepath):
+            printdebug('%s found. Starting to load EDDB commodities reference.'
+                       % filepath)
+            self.timestart = time.clock()
+            if True:    # Eventually this will be a try
+                with open(filepath, 'r', encoding='utf-8') as myfile:
+                    items = json.load(myfile)
+                    for item in items:
+                        self.commodities_count += 1
+                        # Tidy up fields to match DB
+                        # print(item)
+                        item['eddbid'] = item.pop('id')
+                        item['eddbname'] = item.pop('name')
+                        #
+                        if self.dbapi.create_eddb_commodity_in_db(item) is True:
+                            self.commodities_changed += 1
+                        if self.commodities_changed % 100 == 0:
+                            seconds = int(time.clock() - self.timestart)
+                            srate = (self.commodities_count + 1) / (seconds + 1)
+                            crate = (self.commodities_changed + 1) / (seconds + 1)
+                            print('Read %d bodies (%d/s), changed %d(%d/s)              \r' % (
+                                    self.commodities_count, srate,
+                                    self.commodities_changed, crate),
+                                    end='')
+                    myfile.close
+                    #self.dbapi.create_system_bulk_flush()
+                    # self.dbapi.endbodybulkmode()
+                seconds = int(time.clock() - self.timestart)
+                srate = (self.commodities_count + 1) / (seconds + 1)
+                crate = (self.commodities_changed + 1) / (seconds + 1)
+                printdebug('Read %d bodies (%d/s), changed %d(%d/s)              \r' % (
+                        self.commodities_count, srate,
+                        self.commodities_changed, crate)
+                        )
+                printdebug('Successfully loaded bodies JSON: %s' % filepath)
+                #self.data_load_process()
+                #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
+                self.loaded = True  # TODO better checks here
+            #except Exception as e:
+            #    print(str(e))
+
+        else:
+            printerror('%s not found. Cannot load EDDB commodities reference.' % filepath)
+
 
 if __name__ == '__main__':
     #import_listings()
     #print('Listings count is: %d' % listings_count)
+    print(time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()))
     dbapi = EDACDB()
-    #mysystems = Systems(dbapi)
+    mysystems = Systems(dbapi)
     mybodies = Bodies(dbapi)
+    mycommodities = Commodities(dbapi)
+    print(time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()))
     #print(mysystems.lastsystem)
     #print(mysystems.types)
     #max_len =  0
