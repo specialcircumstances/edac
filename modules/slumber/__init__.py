@@ -186,8 +186,8 @@ class Resource(ResourceAttributesMixin, object):
         resp = self._request("PUT", data=data, files=files, params=kwargs)
         return self._process_response(resp)
 
-    def delete(self, **kwargs):
-        resp = self._request("DELETE", params=kwargs)
+    def delete(self, data=None, **kwargs):
+        resp = self._request("DELETE", data=data, params=kwargs)
         if 200 <= resp.status_code <= 299:
             if resp.status_code == 204:
                 return True

@@ -300,14 +300,35 @@ class StationSerializer(serializers.ModelSerializer):
         model = Station
 
 
+class StationBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = Station
+        list_serializer_class = BulkListSerializer
+
+
 class StationCommoditySerializer(serializers.ModelSerializer):
     class Meta:
         model = StationCommodity
 
 
+class StationCommodityBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = StationCommodity
+        list_serializer_class = BulkListSerializer
+
+
 class StationEconomySerializer(serializers.ModelSerializer):
     class Meta:
         model = StationEconomy
+
+
+class StationEconomyBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = StationEconomy
+        list_serializer_class = BulkListSerializer
 
 
 class StationShipSerializer(serializers.ModelSerializer):

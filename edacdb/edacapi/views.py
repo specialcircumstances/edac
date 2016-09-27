@@ -52,6 +52,9 @@ from .serializers import AtmosCompositionBulkSerializer
 from .serializers import SolidCompositionBulkSerializer
 from .serializers import MaterialCompositionBulkSerializer
 from .serializers import RingBulkSerializer, BodyBulkSerializer
+from .serializers import StationBulkSerializer, StationCommodityBulkSerializer
+from .serializers import StationEconomyBulkSerializer
+
 
 
 
@@ -63,6 +66,17 @@ class UpdatingBulkViewSet(BulkModelViewSet):
     parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
 
+    def create(self, request, *args, **kwargs):
+        bulk = isinstance(request.data, list)
+
+        if not bulk:
+            return super(BulkCreateModelMixin, self).create(request, *args, **kwargs)
+
+        else:
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_bulk_create(serializer)
+            return Response(len(serializer.data), status=status.HTTP_201_CREATED)
 
     def bulk_update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
@@ -78,19 +92,46 @@ class UpdatingBulkViewSet(BulkModelViewSet):
         results = []
         for item in request.data:
             item_serializer = self.get_serializer(
-                get_object_or_404(self.filter_queryset(self.get_queryset()), pk=item['id']),
+                get_object_or_404(self.filter_queryset(self.get_queryset()),
+                                  pk=item['id']),
                 data=item,
                 partial=partial,
             )
             if not item_serializer.is_valid():
                 validation_errors.append(item_serializer.errors)
-            result = self.get_queryset().filter(id=item['id']).update(**item_serializer.validated_data)
-            results.append(result)
+            result = self.get_queryset().filter(id=item['id']).update(
+                            **item_serializer.validated_data)
+            # results.append(result)
         if validation_errors:
             raise ValidationError(validation_errors)
-        return Response(results, status=status.HTTP_200_OK)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
+    def allow_bulk_destroy(self, qs, filtered):
+        # custom logic here
+        print('HELLO allow_bulk_destroy')
+        # Blog.objects.filter(pk__in=[1,4,7])
+        # default checks if the qs was filtered
+        # qs comes from self.get_queryset()
+        # filtered comes from self.filter_queryset(qs)
+        return True
 
+    def bulk_destroy(self, request, *args, **kwargs):
+        #qs = self.get_queryset()
+
+        #filtered = self.filter_queryset(qs)
+        #if not self.allow_bulk_destroy(qs, filtered):
+        #    return Response(status=status.HTTP_400_BAD_REQUEST)
+        pklist = request.data
+        pklistlen = len(pklist)
+        if pklistlen == 0:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        print('bulk_destroy got %d items to destroy' % len(pklist))
+        # Need to limit the number of objects we try and destroy
+        # at once.
+        for pk in pklist:
+            self.get_queryset().filter(id=pk).delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CMDRViewSet(viewsets.ModelViewSet):
@@ -147,24 +188,6 @@ class SystemViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         return super(SystemViewSet, self).create(self, request, *args, **kwargs)
-
-
-class SystemBulkViewSet(BulkModelViewSet):
-    """
-    API endpoint that allows Systems to be bulk viewed or edited.
-    """
-    queryset = System.objects.all()
-    renderer_classes = (CBORRenderer, )
-    parser_classes = (CBORParser, )
-    serializer_class = SystemSerpySerializer
-    # TODO control Bulk Deletes
-
-    # Make the whole create atomic
-    # @transaction.atomic
-    def create(self, request, *args, **kwargs):
-        # print(request.content_type)
-        # return self.create(request, *args, **kwargs)
-        return super(SystemBulkViewSet, self).create(request, *args, **kwargs)
 
 
 class SystemBulkCreateViewSet(views.APIView):
@@ -230,7 +253,7 @@ class SystemBulkCreateViewSet(views.APIView):
             return Response(exc, status=status.HTTP_400_BAD_REQUEST)
         # print('Returning Response')
         # Should really put some stuff in here.
-        return Response()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SystemBulkUpdateViewSet(views.APIView):
@@ -307,7 +330,7 @@ class SystemBulkUpdateViewSet(views.APIView):
                     return HttpResponse(exc, status=400)
         # print('Returning Response')
         # Should really put some stuff in here.
-        return Response()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 
@@ -343,13 +366,7 @@ class CBORSysIDListView(views.APIView):
     # content_negotiation_class = IgnoreClientContentNegotiation
 
     def get(self, request, format=None):
-        starttime = time.time()
         systems = System.objects.values('pk', 'edsmid', 'eddbid', 'duphash')
-        print(sys.getsizeof(systems))
-        #print(len(systems))
-        endtime = time.time()
-        timetaken = endtime - starttime
-        print('Got systems in %d seconds' % (timetaken))
         # optimise by changing to a long list.
         list_systems = []
         if len(systems) > 0:
@@ -358,11 +375,6 @@ class CBORSysIDListView(views.APIView):
                             [entry[header] for header in list_headers]
                              for entry in systems]
             list_systems = [len(list_headers)] + list_headers + list_systems
-            print(list_systems[0])
-        endtime = time.time()
-        timetaken = endtime - starttime
-        print('Change to list of dicts in %d seconds' % (timetaken))
-        print(sys.getsizeof(list_systems))
         return Response(list_systems, content_type='application/cbor')
 
 
@@ -681,6 +693,17 @@ class StationViewSet(viewsets.ModelViewSet):
     serializer_class = StationSerializer
 
 
+class StationBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = Station.objects.all()
+    serializer_class = StationBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
 class StationCommodityViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
@@ -689,12 +712,34 @@ class StationCommodityViewSet(viewsets.ModelViewSet):
     serializer_class = StationCommoditySerializer
 
 
+class StationCommodityBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = StationCommodity.objects.all()
+    serializer_class = StationCommodityBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
 class StationEconomyViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
     """
     queryset = StationEconomy.objects.all()
     serializer_class = StationEconomySerializer
+
+
+class StationEconomyBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = StationEconomy.objects.all()
+    serializer_class = StationEconomyBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
 
 
 class StationShipViewSet(viewsets.ModelViewSet):

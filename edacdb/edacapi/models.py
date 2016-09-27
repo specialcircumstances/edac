@@ -484,6 +484,7 @@ class Station(models.Model):
     eddb_shipyard_updated_at = models.IntegerField(blank=True, null=True)
     eddb_outfitting_updated_at = models.IntegerField(blank=True, null=True)
     eddb_market_updated_at = models.IntegerField(blank=True, null=True)
+    duphash = models.CharField(max_length=8, blank=True, default='')
 '''
 {"id":14,"name":"Bounds Hub","system_id":773,"max_landing_pad_size":"L",
 "distance_to_star":910,"faction":"Blood Brothers from Alrai",

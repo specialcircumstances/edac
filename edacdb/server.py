@@ -40,7 +40,8 @@ class DjangoApplication(object):
             'server.socket_host': self.HOST,
             'server.socket_port': self.PORT,
             'engine.autoreload_on': False,
-            'log.screen': True
+            'log.screen': True,
+            'numthreads': 20
         })
         self.mount_static(settings.STATIC_URL, settings.STATIC_ROOT)
 
@@ -48,11 +49,11 @@ class DjangoApplication(object):
         cherrypy.tree.graft(WSGIHandler())
         cherrypy.engine.start()
 
-        self.open_browser()
+        # self.open_browser()
 
         cherrypy.engine.block()
 
 
 if __name__ == "__main__":
-    print("Your app is running at http://localhost:8001")
+    print("Your app is running at http://localhost:8000")
 DjangoApplication().run()

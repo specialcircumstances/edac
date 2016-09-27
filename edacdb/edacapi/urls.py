@@ -44,8 +44,9 @@ router.register(r'stationships', views.StationShipViewSet)
 router.register(r'stationsmodules', views.StationModuleViewSet)
 
 
-bulkrouter = BulkRouter(schema_title='EDACD API Bulk Schema', schema_url='./bulk/')
-bulkrouter.register(r'systems', views.SystemBulkViewSet, 'bulksys')
+bulkrouter = BulkRouter(schema_title='EDACD API Bulk Schema',
+                        schema_url='./bulk/')
+# bulkrouter.register(r'systems', views.SystemBulkViewSet, 'bulksys')
 bulkrouter.register(r'factions', views.FactionBulkViewSet, 'bulkfact')
 bulkrouter.register(r'atmoscomposition',
                     views.AtmosCompositionBulkViewSet, 'bulkatmoscomposition')
@@ -56,6 +57,13 @@ bulkrouter.register(r'materialcomposition',
                     'bulkmaterialcomposition')
 bulkrouter.register(r'rings', views.RingBulkViewSet, 'bulkrings')
 bulkrouter.register(r'bodies', views.BodyBulkViewSet, 'bulkbodies')
+bulkrouter.register(r'stations', views.StationBulkViewSet, 'bulkstations')
+bulkrouter.register(r'stationcommodities', views.StationCommodityBulkViewSet,
+                    'bulkstationcommodities')
+bulkrouter.register(r'stationeconomies', views.StationEconomyBulkViewSet,
+                    'stationeconomies')
+
+
 
 
 
@@ -64,7 +72,7 @@ bulkrouter.register(r'bodies', views.BodyBulkViewSet, 'bulkbodies')
 urlpatterns = [
     url(r'^', include(router.urls)),
     url(r'^bulk/', include(bulkrouter.urls)),
-    url(r'^bulk/cbor/systemids/', views.FastSysIDListView.as_view()),
+    # url(r'^bulk/cbor/systemids/', views.FastSysIDListView.as_view()),
     url(r'^bulk/cbor/cborsystemids/', views.CBORSysIDListView.as_view()),
     url(r'^bulk/bcreatesystems/', views.SystemBulkCreateViewSet.as_view()),
     url(r'^bulk/bupdatesystems/', views.SystemBulkUpdateViewSet.as_view()),
