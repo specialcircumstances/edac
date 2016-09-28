@@ -99,6 +99,59 @@ class HardpointMount(models.Model):
     attached = models.CharField(max_length=64, blank=True, default='')  # FDEV Symbol
 
 
+class ShipType(models.Model):
+    edid = models.IntegerField(unique=True, blank=True, null=True)
+    edsymbol = models.CharField(unique=True, max_length=64, blank=True, default='')
+    name = models.CharField(unique=True, max_length=64, blank=True, default='')
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+
+
+class ModuleCategory(models.Model):
+    # e.g. Standard, Hardpoint, Optional
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    eddbname = models.CharField(max_length=64, blank=True, default='')
+    name = models.CharField(max_length=64, blank=True, default='')
+
+
+class ModuleGroup(models.Model):
+    # e.g. Powerplant, ShieldGenerator, Pulse Laser
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    eddbname = models.CharField(max_length=64, blank=True, default='')
+    name = models.CharField(max_length=64, blank=True, default='')
+    category = models.ForeignKey(ModuleCategory, on_delete=models.CASCADE)
+    # Coriolis Id e.g. 'pp'
+    coriolisid = models.CharField(max_length=3, blank=True, default='')
+
+
+class ModuleMountType(models.Model):
+    # e.g. Fixed, Gimballed, Turreted only used for weapons
+    name = models.CharField(unique=True, max_length=64, blank=True, default='')
+
+
+class ModuleGuidanceType(models.Model):
+    # e.g. Seeke, Dumbfire - only used for Missiles
+    name = models.CharField(unique=True, max_length=64, blank=True, default='')
+    shortname = models.CharField(unique=True, max_length=1, blank=True, default='')
+
+
+class Module(models.Model):
+    # This is an available ship module or component in the game
+    eddbid = models.IntegerField(unique=True, blank=True, null=True)
+    eddbname = models.CharField(max_length=64, blank=True, default='')
+    name = models.CharField(max_length=64, blank=True, default='')
+    group = models.ForeignKey(ModuleGroup, on_delete=models.CASCADE)
+    cclass = models.IntegerField(blank=True, null=True)
+    rating = models.CharField(max_length=1, blank=True, default='')
+    price = models.IntegerField(blank=True, null=True)
+    edid = models.IntegerField(unique=True, blank=True, null=True)
+    edsymbol = models.CharField(unique=True, max_length=64, blank=True, default='')
+    # These often not populated
+    ship = models.ForeignKey(ShipType, on_delete=models.CASCADE, blank=True, null=True)
+    mount = models.ForeignKey(ModuleMountType, on_delete=models.SET_NULL, blank=True, null=True)
+    guidance = models.ForeignKey(ModuleGuidanceType, on_delete=models.SET_NULL, blank=True, null=True)
+    entitlement = models.CharField(max_length=64, blank=True, default='')
+
+
 class SecurityLevel(models.Model):
     # What we know about a security rating
     # {'Low': 1591, 'High': 1108, 'Medium': 2327}
@@ -442,6 +495,7 @@ class CommodityCategory(models.Model):
 
 
 class Commodity(models.Model):
+    edid = models.IntegerField(unique=True, blank=True, null=True)
     eddbid = models.IntegerField(unique=True, blank=True, null=True)
     name = models.CharField(max_length=64, blank=True, default='')
     eddbname = models.CharField(max_length=64, blank=True, default='')

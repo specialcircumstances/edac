@@ -1143,16 +1143,15 @@ class StationJoinCache(CompositionCache):
         action = 'create'
         pklist = []
         if station in self.items:   # We already have this body in our cache
-            if lookupf in self.items[station]:
-                if set(self.items[station].keys()
-                        ) == set(indict[lookupf]):
-                    # Note indict[lookupf] is a list but we need compare with
-                    # dict keys, in order, so use sets.
-                    return False         # Yes I found it, but no update.
-                else:
-                    # We have no "update" action, we always delete
-                    # and replace. Need a list of PKs to delete
-                    pklist = [v for k, v in self.items[station].items()]
+            if set(self.items[station].keys()
+                    ) == set(indict[lookupf]):
+                # Note indict[lookupf] is a list but we need compare with
+                # dict keys, in order, so use sets.
+                return False         # Yes I found it, but no update required
+            else:
+                # We have no "update" action, we always delete
+                # and replace. Need a list of PKs to delete
+                pklist = [v for k, v in self.items[station].items()]
         try:
             # Delete the previous list if there is one
             for pk in pklist:

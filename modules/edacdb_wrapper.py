@@ -27,13 +27,14 @@ try:
     from modules.edacdb_cache import DBCache
 except:
     from edacdb_cache import DBCache
+import config
 
 # Just using django runserver at the moment
-default_dbapi = 'http://127.0.0.1:8000/edacapi/'
-default_bulkapi = 'http://127.0.0.1:8000/edacapi/bulk/'
-default_cborapi = 'http://127.0.0.1:8000/edacapi/bulk/cbor'
-default_username = 'root'
-default_password = 'password1234'
+default_dbapi = config.settings.edacapi('dbapiurl')
+default_bulkapi = config.settings.edacapi('bulkapiurl')
+default_cborapi = config.settings.edacapi('cborapiurl')
+default_username = config.settings.edacapi('apiusername')
+default_password = config.settings.edacapi('apipassword')
 
 DEBUG = True
 ERROR = True

@@ -10,25 +10,26 @@ import base64
 import urllib.request
 import shutil
 from gzip import GzipFile
+import config
 
 
 # These files should be from
 # https://github.com/EDCD/FDevIDs
-bodiesurl = "https://eddb.io/archive/v4/bodies.jsonl"
-bodiesfile = "modules\eddb-data\\bodies.jsonl"
-commodiesurl = "https://eddb.io/archive/v4/commodities.json"
-commodiesfile = 'modules\eddb-data\commodities.json'
-listingurl = "https://eddb.io/archive/v4/listings.csv"
-listingsfile = 'modules\eddb-data\listings.csv'
-modulesurl = "https://eddb.io/archive/v4/modules.json"
-modulesfile = 'modules\eddb-data\modules.json'
-stationsurl = "https://eddb.io/archive/v4/stations.jsonl"
-stationsfile = 'modules\eddb-data\stations.jsonl'
-systemsurl = "https://eddb.io/archive/v4/systems.jsonl"
-systemsfile = 'modules\eddb-data\systems.jsonl'
-systemsfileout = 'modules\eddb-data\systems.cbor'
-popsystemsurl = "https://eddb.io/archive/v4/systems_populated.jsonl"
-populatedsystemsfile = 'modules\eddb-data\systems_populated.jsonl'
+bodiesfile = config.settings.getsourcefile('eddbbodiesfile')
+commoditiesfile = config.settings.getsourcefile('eddbcommoditiesfile')
+listingsfile = config.settings.getsourcefile('eddblistingsfile')
+modulesfile = config.settings.getsourcefile('eddbmodulesfile')
+stationsfile = config.settings.getsourcefile('eddbstationsfile')
+systemsfile = config.settings.getsourcefile('eddbsystemsfile')
+populatedsystemsfile = config.settings.getsourcefile('eddbpopulatedsystemsfile')
+
+bodiesurl = config.settings.getsourceurl('bodies')
+commoditiesurl = config.settings.getsourceurl('commodities')
+listingurl = config.settings.getsourceurl('listings')
+modulesurl = config.settings.getsourceurl('modules')
+stationsurl = config.settings.getsourceurl('stations')
+systemsurl = config.settings.getsourceurl('systems')
+popsystemsurl = config.settings.getsourceurl('popsystems')
 
 
 def getfile(url, file_name):
@@ -47,7 +48,7 @@ def getfile(url, file_name):
 
 def getalleddbfiles():
     getfile(bodiesurl, bodiesfile)
-    getfile(commodiesurl, commodiesfile)
+    getfile(commoditiesurl, commoditiesfile)
     getfile(listingurl, listingsfile)
     getfile(modulesurl, modulesfile)
     getfile(stationsurl, stationsfile)

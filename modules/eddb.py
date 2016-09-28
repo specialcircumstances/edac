@@ -14,18 +14,22 @@ try:
     from modules.edacdb_wrapper import EDACDB
 except:
     from edacdb_wrapper import EDACDB
+import config
+
 
 # Many module globals
 
 # These files should be from
 # https://github.com/EDCD/FDevIDs
-bodiesfile = 'modules\eddb-data\\bodies.jsonl'
-commoditiesfile = 'modules\eddb-data\commodities.json'
-listingsfile = 'modules\eddb-data\listings.csv'
-modulesfile = 'modules\eddb-data\modules.json'
-stationsfile = 'modules\eddb-data\stations.jsonl'
-systemsfile = 'modules\eddb-data\systems.jsonl'
-populatedsystemsfile = 'modules\eddb-data\systems_populated.jsonl'
+
+bodiesfile = config.settings.getsourcefile('eddbbodiesfile')
+commoditiesfile = config.settings.getsourcefile('eddbcommoditiesfile')
+listingsfile = config.settings.getsourcefile('eddblistingsfile')
+modulesfile = config.settings.getsourcefile('eddbmodulesfile')
+stationsfile = config.settings.getsourcefile('eddbstationsfile')
+systemsfile = config.settings.getsourcefile('eddbsystemsfile')
+populatedsystemsfile = config.settings.getsourcefile('eddbpopulatedsystemsfile')
+
 
 listings = {}
 listings_count = 0
@@ -419,6 +423,73 @@ class Stations(object):
         self.types = {}
         self.dbapi = dbapi
         if isfile(filepath):
+            printdebug('%s found. Starting to load EDDB stations file.'
+                       % filepath)
+            self.timestart = time.clock()
+            if True:    # Eventually this will be a try
+                for x in range(0, 2):    # Two passes to enable bulk methods
+                    with open(filepath, 'r', encoding='utf-8') as myfile:
+                        self.dbapi.startstationbulkmode()
+                        for line in myfile:
+                            item = json.loads(line)
+                            self.stations_count += 1
+                            # Tidy up fields to match DB
+                            # print(item)
+                            item['eddbid'] = item.pop('id')
+                            item['eddb_updated_at'] = item.pop('updated_at')
+                            item['eddb_shipyard_updated_at'] = item.pop('shipyard_updated_at')
+                            item['eddb_outfitting_updated_at'] = item.pop('outfitting_updated_at')
+                            item['eddb_market_updated_at'] = item.pop('market_updated_at')
+                            if item['max_landing_pad_size'] == 'None':
+                                item['max_landing_pad_size'] = '0'
+                            elif item['max_landing_pad_size'] == None:
+                                item['max_landing_pad_size'] = ''
+                            # item['eddbname'] = item.pop('name')
+                            #
+                            if self.dbapi.create_eddb_station_in_db(item) is True:
+                                self.stations_changed += 1
+                            if self.stations_count % 100 == 0:
+                                seconds = int(time.clock() - self.timestart)
+                                srate = (self.stations_count + 1) / (seconds + 1)
+                                crate = (self.stations_changed + 1) / (seconds + 1)
+                                print('Read %d stations (%d/s), changed %d(%d/s)              \r' % (
+                                        self.stations_count, srate,
+                                        self.stations_changed, crate),
+                                        end='')
+                        myfile.close
+                        #self.dbapi.create_system_bulk_flush()
+                        self.dbapi.endstationbulkmode()
+                seconds = int(time.clock() - self.timestart)
+                srate = (self.stations_count + 1) / (seconds + 1)
+                crate = (self.stations_changed + 1) / (seconds + 1)
+                printdebug('Read %d stations (%d/s), changed %d(%d/s)              \r' % (
+                        self.stations_count, srate,
+                        self.stations_changed, crate)
+                        )
+                printdebug('Successfully loaded stations JSON: %s' % filepath)
+                #self.data_load_process()
+                #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
+                self.loaded = True  # TODO better checks here
+            #except Exception as e:
+            #    print(str(e))
+
+        else:
+            printerror('%s not found. Cannot load EDDB stations reference.' % filepath)
+
+
+class Stations(object):
+
+    def __init__(self, dbapi, filepath=stationsfile):
+        # Well, we need to open the filepath
+        if type(dbapi) is not EDACDB:
+            printerror('dbapi must be of type EDACDB()')
+            return False
+        self.stations = {}
+        self.stations_count = 0
+        self.stations_changed = 0
+        self.types = {}
+        self.dbapi = dbapi
+        if isfile(filepath):
             printdebug('%s found. Starting to load EDDB stations reference.'
                        % filepath)
             self.timestart = time.clock()
@@ -479,6 +550,7 @@ if __name__ == '__main__':
     #print('Listings count is: %d' % listings_count)
     print(time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()))
     dbapi = EDACDB()
+    mydevids = FDevIDs(dbapi)
     #mysystems = Systems(dbapi)
     #mybodies = Bodies(dbapi)
     #mycommodities = Commodities(dbapi)

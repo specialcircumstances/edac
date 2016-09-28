@@ -1,0 +1,39 @@
+sourcefiles:
+  eddbbodiesfile: "modules/eddb-data/bodies.jsonl"
+  eddbcommoditiesfile: 'modules/eddb-data/commodities.json'
+  eddblistingsfile: 'modules/eddb-data/listings.csv'
+  eddbmodulesfile: 'modules/eddb-data/modules.json'
+  eddbstationsfile: 'modules/eddb-data/stations.jsonl'
+  eddbsystemsfile: 'modules/eddb-data/systems.jsonl'
+  eddbpopulatedsystemsfile: 'modules/eddb-data/systems_populated.jsonl'
+
+sourceurls:
+  bodies: "https://eddb.io/archive/v4/bodies.jsonl"
+  commodities: "https://eddb.io/archive/v4/commodities.json"
+  listings: "https://eddb.io/archive/v4/listings.csv"
+  modules: "https://eddb.io/archive/v4/modules.json"
+  stations: "https://eddb.io/archive/v4/stations.jsonl"
+  systems: "https://eddb.io/archive/v4/systems.jsonl"
+  popsystems: "https://eddb.io/archive/v4/systems_populated.jsonl"
+
+edacapi:
+  dbapiurl: 'http://127.0.0.1:8000/edacapi/'
+  bulkapiurl: 'http://127.0.0.1:8000/edacapi/bulk/'
+  cborapiurl: 'http://127.0.0.1:8000/edacapi/bulk/cbor'
+  apiusername: 'root'
+  apipassword: 'password1234'
+
+remark1:
+  belowhere: 'All just examples'
+jenkins:
+  host: http://jenkins.example.com
+  user: donny
+  token: I@m7h3W4lrU$
+dbx:
+  host: http://mysql.example.com
+  user: lebowski
+repo: /path/to/directory
+require:
+- ldap
+- php
+- zip
