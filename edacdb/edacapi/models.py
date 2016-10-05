@@ -104,7 +104,8 @@ class ShipType(models.Model):
     edsymbol = models.CharField(unique=True, max_length=64, blank=True, default='')
     name = models.CharField(unique=True, max_length=64, blank=True, default='')
     eddbid = models.IntegerField(unique=True, blank=True, null=True)
-
+    eddbname = models.CharField(max_length=64, blank=True, default='')
+    manufacturer = models.CharField(max_length=64, blank=True, default='')
 
 class ModuleCategory(models.Model):
     # e.g. Standard, Hardpoint, Optional
@@ -118,7 +119,7 @@ class ModuleGroup(models.Model):
     eddbid = models.IntegerField(unique=True, blank=True, null=True)
     eddbname = models.CharField(max_length=64, blank=True, default='')
     name = models.CharField(max_length=64, blank=True, default='')
-    category = models.ForeignKey(ModuleCategory, on_delete=models.CASCADE)
+    category = models.ForeignKey(ModuleCategory, on_delete=models.SET_NULL, blank=True, null=True)
     # Coriolis Id e.g. 'pp'
     coriolisid = models.CharField(max_length=3, blank=True, default='')
 
@@ -126,12 +127,13 @@ class ModuleGroup(models.Model):
 class ModuleMountType(models.Model):
     # e.g. Fixed, Gimballed, Turreted only used for weapons
     name = models.CharField(unique=True, max_length=64, blank=True, default='')
+    shortname = models.CharField(unique=True, max_length=1, blank=True, default='')
 
 
 class ModuleGuidanceType(models.Model):
     # e.g. Seeke, Dumbfire - only used for Missiles
     name = models.CharField(unique=True, max_length=64, blank=True, default='')
-    shortname = models.CharField(unique=True, max_length=1, blank=True, default='')
+    # shortname = models.CharField(unique=True, max_length=1, blank=True, default='')
 
 
 class Module(models.Model):
@@ -139,14 +141,14 @@ class Module(models.Model):
     eddbid = models.IntegerField(unique=True, blank=True, null=True)
     eddbname = models.CharField(max_length=64, blank=True, default='')
     name = models.CharField(max_length=64, blank=True, default='')
-    group = models.ForeignKey(ModuleGroup, on_delete=models.CASCADE)
+    group = models.ForeignKey(ModuleGroup, on_delete=models.SET_NULL, blank=True, null=True)
     cclass = models.IntegerField(blank=True, null=True)
     rating = models.CharField(max_length=1, blank=True, default='')
     price = models.IntegerField(blank=True, null=True)
     edid = models.IntegerField(unique=True, blank=True, null=True)
     edsymbol = models.CharField(unique=True, max_length=64, blank=True, default='')
     # These often not populated
-    ship = models.ForeignKey(ShipType, on_delete=models.CASCADE, blank=True, null=True)
+    ship = models.ForeignKey(ShipType, on_delete=models.SET_NULL, blank=True, null=True)
     mount = models.ForeignKey(ModuleMountType, on_delete=models.SET_NULL, blank=True, null=True)
     guidance = models.ForeignKey(ModuleGuidanceType, on_delete=models.SET_NULL, blank=True, null=True)
     entitlement = models.CharField(max_length=64, blank=True, default='')
@@ -562,13 +564,28 @@ class Station(models.Model):
 758,759,760,761,762,763,764,765,766,etc,1549,1550]}
 '''
 
-class StationCommodity(models.Model):
-    # Buy Sell Don't bring?
+class StationImport(models.Model):
     commodity = models.ForeignKey(Commodity, models.CASCADE)
     station = models.ForeignKey(Station, models.CASCADE)
-    imported = models.NullBooleanField(blank=True, null=True)   # Y N ?
-    exported = models.NullBooleanField(blank=True, null=True)   # Y N ?
-    prohibited = models.NullBooleanField(blank=True, null=True)   # Y N ?
+
+    class Meta:
+        unique_together = ('station', 'commodity',)
+
+
+class StationExport(models.Model):
+    commodity = models.ForeignKey(Commodity, models.CASCADE)
+    station = models.ForeignKey(Station, models.CASCADE)
+
+    class Meta:
+        unique_together = ('station', 'commodity',)
+
+
+class StationProhibited(models.Model):
+    commodity = models.ForeignKey(Commodity, models.CASCADE)
+    station = models.ForeignKey(Station, models.CASCADE)
+
+    class Meta:
+        unique_together = ('station', 'commodity',)
 
 
 class StationEconomy(models.Model):
@@ -576,12 +593,20 @@ class StationEconomy(models.Model):
     economy = models.ForeignKey(Economy, models.CASCADE)
     station = models.ForeignKey(Station, models.CASCADE)
 
+    class Meta:
+        unique_together = ('station', 'economy',)
+
 
 class StationShip(models.Model):
-    # ship = models.ForeignKey(ShipType, models.CASCADE) TODO
+    shiptype = models.ForeignKey(ShipType, models.CASCADE)
     station = models.ForeignKey(Station, models.CASCADE)
 
+    class Meta:
+        unique_together = ('station', 'shiptype',)
 
 class StationModule(models.Model):
-    # module = models.ForeignKey(ModuleType, models.CASCADE) TODO
+    module = models.ForeignKey(Module, models.CASCADE)
     station = models.ForeignKey(Station, models.CASCADE)
+
+    class Meta:
+        unique_together = ('station', 'module',)

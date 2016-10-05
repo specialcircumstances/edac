@@ -11,6 +11,7 @@ import urllib.request
 import shutil
 from gzip import GzipFile
 import config
+from os.path import isfile
 
 
 # These files should be from
@@ -31,6 +32,20 @@ stationsurl = config.settings.getsourceurl('stations')
 systemsurl = config.settings.getsourceurl('systems')
 popsystemsurl = config.settings.getsourceurl('popsystems')
 
+
+DEBUG = True
+ERROR = True
+VERSION = '2.2 Beta'
+
+
+def printdebug(mystring):
+    if DEBUG is True:
+        print("DEBUG eddb: %s" % mystring)
+
+
+def printerror(mystring):
+    if ERROR is True:
+        print("ERROR eddb: %s" % mystring)
 
 def getfile(url, file_name):
     # Download the file from `url` and save it locally under `file_name`:
@@ -194,6 +209,52 @@ def comparefirstlines(file01, file02):
         print('%s: %s : %s : %s'  % (keys, item1[keys], item2[keys], note))
 
 
+def getfdeveddbs(filepath=modulesfile):
+    # Well, we need to open the filepath
+    from fdevid import Mapper
+    from coriolis import Coriolis
+    fdevmapper = Mapper()
+    coriolis = Coriolis()
+    mydict = {}
+    eddbidlookup = {}
+    if isfile(filepath):
+        printdebug('%s found. Starting to load EDDB Modules data.' % filepath)
+        with open(filepath, 'r', encoding='utf-8') as myfile:
+            items = json.load(myfile)
+            for item in items:
+                if item['id'] is not None and item['ed_id'] is not None:
+                    eddbidlookup[int(item['ed_id'])] = item['id']
+                else:
+                    pass
+                print(item['ed_id'], item['id'])
+            for myedid in fdevmapper.getallmoduleids():
+                # myeddbid = item['id']
+                #mydict[myedid] = 0
+                mydict[int(myedid)] = int(eddbidlookup[int(myedid)])
+                '''
+                cout = coriolis.modules.getmodbyedid(myedid)
+                if cout is not None:
+                    if 'eddbID' in cout:
+                        mydict[myedid] = cout['eddbID']
+                else:
+                    for ship in coriolis.ships.ships:
+                        for bulkhead in coriolis.ships.ships[ship].bulkheads:
+                            if 'edID' in bulkhead:
+                                if int(bulkhead['edID']) == int(myedid):
+                                    mydict[myedid] = bulkhead['eddbID']
+                                    print('bing')
+                '''
+
+
+        myfile.close
+#        for key in sorted(mydict.keys()):
+#            print('%s, %d' % (key, mydict[key]))
+        for key in sorted(mydict.keys()):
+            print('%d' % (mydict[key]))
+        printdebug('Successfully loaded Modules JSON: %s' % filepath)
+    else:
+        printerror('%s not found. Cannot load EDDB Modules data.' % filepath)
+
 
 
 if __name__ == '__main__':
@@ -201,3 +262,4 @@ if __name__ == '__main__':
     #comparefirstlines('modules\eddb-data\systems.jsonl',
     #                  'modules\eddb-data\systemsc.jsonl')
     getalleddbfiles()
+    #getfdeveddbs()

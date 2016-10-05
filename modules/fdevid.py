@@ -6,14 +6,20 @@
 
 import csv
 from os.path import isfile
+try:
+    from modules.edacdb_wrapper import EDACDB
+except:
+    from edacdb_wrapper import EDACDB
+import config
+import copy
 
 # Many module globals
 
 # These files should be from
 # https://github.com/EDCD/FDevIDs
-shipyardcsv = 'modules\FDevIDs\shipyard.csv'
-outfittingcsv = 'modules\FDevIDs\outfitting.csv'
-commoditycsv = 'modules\FDevIDs\commodity.csv'
+shipyardcsv = config.settings.getsourcefile('fdevidshipyard')
+outfittingcsv = config.settings.getsourcefile('fdevidoutfitting')
+commoditycsv = config.settings.getsourcefile('fdevidcommodity')
 
 DEBUG = True
 ERROR = True
@@ -21,7 +27,7 @@ VERSION = '2.2 Beta'
 
 shipyardbyname = {}
 shipyardbyid = {}
-shipyardbysymbol = {}   # All symbols will be keyed in lower case
+shipyardbysymbol = {}
 outfittingnames = []     # Note not unique keys, so just a list
 outfittingbysymbol = {}
 outfittingbyid = {}
@@ -34,12 +40,12 @@ commoditycategories = []
 
 def printdebug(mystring):
     if DEBUG is True:
-        print("DEBUG coriolis: %s" % mystring)
+        print("DEBUG fdevid: %s" % mystring)
 
 
 def printerror(mystring):
     if ERROR is True:
-        print("ERROR coriolis: %s" % mystring)
+        print("ERROR fdevid: %s" % mystring)
 
 
 def shipyardindexer(mydict):
@@ -47,10 +53,10 @@ def shipyardindexer(mydict):
     # {'name': 'Sidewinder', 'id': '128049249', 'symbol': 'SideWinder'}
     name = mydict['name']
     myid = mydict['id']
-    symbol = mydict['symbol'].lower()
+    symbol = mydict['symbol']
     shipyardbyname[name] = {'id': myid, 'symbol': symbol}
     shipyardbyid[myid] = {'name': name, 'symbol': symbol}
-    shipyardbysymbol[symbol] = {'id': myid, 'name': name}
+    shipyardbysymbol[symbol] = mydict
     return
 
 
@@ -73,7 +79,7 @@ def outfittingindexer(mydict):
     # As this is bigger use primary index by symbol then lookups to that.
     name = mydict['name']
     myid = mydict['id']
-    symbol = mydict['symbol'].lower()
+    symbol = mydict['symbol']
     category = mydict['category']
     outfittingbysymbol[symbol] = mydict
     if name not in outfittingnames:
@@ -136,7 +142,7 @@ class Mapper(object):
             return None
 
     def getshipbysymbol(self, symbol):
-        if symbol.lower() in self.shipyardbysymbol.keys():
+        if symbol in self.shipyardbysymbol.keys():
             return self.shipyardbysymbol[symbol]
         else:
             return None
@@ -150,14 +156,17 @@ class Mapper(object):
         else:
             return None
 
+    def getallmoduleids(self):
+        return self.outfittingbyid.keys()
+
     def getmodulebysymbol(self, symbol):
-        if symbol.lower() in self.outfittingbysymbol.keys():
+        if symbol in self.outfittingbysymbol.keys():
             return self.outfittingbysymbol[symbol]
         else:
             return None
 
     def getmoduleidbysymbol(self, symbol):
-        if symbol.lower() in self.outfittingbysymbol.keys():
+        if symbol in self.outfittingbysymbol.keys():
             return self.outfittingbysymbol[symbol]['id']
         else:
             return None
@@ -181,12 +190,73 @@ class Mapper(object):
         self.commoditiesbyname = commoditiesbyname
         self.commoditycategories = commoditycategories
 
+
+class LoadToDB(object):
+    # Module initialisation ensures we have some dicts to call upon
+
+    def ships(self):
+        #shipyardbysymbol[symbol] = {'id': myid, 'name': name}
+        count = 0
+        printdebug("Start FDEVID DB Loader Ships")
+        for symbol, data in self.shipyardbysymbol.items():
+            mydict = {
+                'edid': data['id'],
+                'edsymbol': symbol,
+                'name': data['name'],
+                'eddbid': data['eddbid'],
+                'eddbname': data['eddbname'],
+                'manufacturer': data['manufacturer']
+            }
+            #print("adding ship")
+            self.dbapi.create_fdevidship_in_db(mydict)
+            count += 1
+        printdebug('%d ships loaded to DB' % count)
+
+    def modules(self):
+        # outfittingbysymbol[symbol] = mydict
+        # {'category': 'internal', 'id': '128666704', 'class': '1',
+        # 'rating': 'E', 'entitlement': '', 'guidance': '', 'ship': '',
+        # 'mount': '', 'name': 'Frame Shift Drive Interdictor',
+        # 'symbol': 'Int_FSDInterdictor_Size1_Class1'}
+        # now also 'eddbid'
+        count = 0
+        printdebug("Start FDEVID DB Loader Modules")
+        for item in self.outfittingbysymbol:
+            # print(item)
+            mydict = copy.deepcopy(self.outfittingbysymbol[item])
+            mydict['edid'] = mydict.pop('id')
+            mydict['edsymbol'] = mydict.pop('symbol')
+            # print("adding module")
+            self.dbapi.create_fdevidmodule_in_db(mydict)
+            count += 1
+        printdebug('%d modules loaded to DB' % count)
+
+    def __init__(self, dbapi):
+        # Make copies mutable copies of the module dictionaries
+        printdebug("Start FDEVID DB Loader INIT")
+        self.shipyardbyname = shipyardbyname
+        self.shipyardbyid = shipyardbyid
+        self.shipyardbysymbol = shipyardbysymbol
+        self.outfittingnames = outfittingnames
+        self.outfittingbysymbol = outfittingbysymbol
+        self.outfittingbyid = outfittingbyid
+        self.outfittingcategories = outfittingcategories
+        self.commoditiesbyid = commoditiesbyid
+        self.commoditiesbyname = commoditiesbyname
+        self.commoditycategories = commoditycategories
+        self.dbapi = dbapi
+        printdebug("Finished FDEVID DB Loader INIT")
+
+
 # Module intialisation Functions
 import_shipyard()
 import_outfitting()
 import_commodities()
 
 if __name__ == '__main__':
+    '''
+    Some tests
+    '''
     print('Shipyard by name')
     print(shipyardbyname.keys())
     print('Shipyard by ID')
@@ -220,3 +290,10 @@ if __name__ == '__main__':
     print(mymapper.getmodulebyid('128049406'))
     print(mymapper.getmodulebysymbol('Hpt_PulseLaserBurst_Gimbal_Large'))
     print(mymapper.getmoduleidbysymbol('Hpt_PulseLaserBurst_Gimbal_Large'))
+    '''
+    Below here are the import is the import into DB functionality
+    '''
+    dbapi = EDACDB()
+    loader = LoadToDB(dbapi)
+    loader.ships()
+    loader.modules()

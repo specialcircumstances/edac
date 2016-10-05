@@ -7,7 +7,7 @@ def deactivate_synchronous(sender, connection, **kwargs):
         cursor = connection.cursor()
         cursor.execute('PRAGMA synchronous = OFF;')
         cursor.execute('PRAGMA journal_mode = MEMORY;')
-        cursor.execute('PRAGMA cache_size = 100000;')
+        cursor.execute('PRAGMA cache_size = 1000000;')
 
 
 connection_created.connect(deactivate_synchronous)

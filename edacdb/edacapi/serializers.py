@@ -6,8 +6,11 @@ from .models import AtmosType, AtmosComponent
 from .models import BodyGroup, BodyType, VolcanismType, RingType, SolidType
 from .models import MaterialType, Body, SolidComposition, AtmosComposition
 from .models import MaterialComposition, Ring, CommodityCategory, Commodity
-from .models import StationType, Station, StationCommodity, StationEconomy
-from .models import StationShip, StationModule
+from .models import StationType, Station, StationEconomy
+from .models import StationShip, StationModule, ShipType, Module
+from .models import ModuleMountType, ModuleGuidanceType
+from .models import ModuleCategory, ModuleGroup, StationShip, StationModule
+from .models import StationImport, StationExport, StationProhibited
 from rest_framework import serializers
 from rest_framework_bulk import BulkSerializerMixin, BulkListSerializer
 
@@ -22,6 +25,16 @@ class CMDRSerializer(serializers.ModelSerializer):
 class ShipSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ship
+
+
+class ShipTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShipType
+
+
+class ModuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Module
 
 
 class SystemSerializer(serializers.ModelSerializer):
@@ -127,6 +140,26 @@ class SystemIDSerializer(serializers.ModelSerializer):
 class ModuleSlotSerializer(serializers.ModelSerializer):
     class Meta:
         model = ModuleSlot
+
+
+class ModuleMountTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleMountType
+
+
+class ModuleGuidanceTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleGuidanceType
+
+
+class ModuleCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleCategory
+
+
+class ModuleGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleGroup
 
 
 class HardpointMountSerializer(serializers.ModelSerializer):
@@ -307,15 +340,39 @@ class StationBulkSerializer(BulkSerializerMixin,
         list_serializer_class = BulkListSerializer
 
 
-class StationCommoditySerializer(serializers.ModelSerializer):
+class StationImportSerializer(serializers.ModelSerializer):
     class Meta:
-        model = StationCommodity
+        model = StationImport
 
 
-class StationCommodityBulkSerializer(BulkSerializerMixin,
+class StationImportBulkSerializer(BulkSerializerMixin,
                          serializers.ModelSerializer):
     class Meta:
-        model = StationCommodity
+        model = StationImport
+        list_serializer_class = BulkListSerializer
+
+
+class StationExportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StationExport
+
+
+class StationExportBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = StationExport
+        list_serializer_class = BulkListSerializer
+
+
+class StationProhibitedSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StationProhibited
+
+
+class StationProhibitedBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = StationProhibited
         list_serializer_class = BulkListSerializer
 
 
@@ -336,6 +393,20 @@ class StationShipSerializer(serializers.ModelSerializer):
         model = StationShip
 
 
+class StationShipBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = StationShip
+        list_serializer_class = BulkListSerializer
+
+
 class StationModuleSerializer(serializers.ModelSerializer):
     class Meta:
         model = StationModule
+
+
+class StationModuleBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = StationModule
+        list_serializer_class = BulkListSerializer

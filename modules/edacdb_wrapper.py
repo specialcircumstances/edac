@@ -55,10 +55,16 @@ class EDACDB(object):
     # primary object
     # http://www.coreapi.org/specification/document/
 
-    def create_system_bulk_flush(self):
+    #def create_system_bulk_flush(self):
         # Should be called when using bulk update method
         # to ensure anything not sent is sent before object deleted
-        self.cache.systemids.flushbulkupdate()
+        #self.cache.systemids.flushbulkupdate()
+
+    def startsystemidbulkmode(self):
+        self.cache.systemids.startbulkmode()
+
+    def endsystemidbulkmode(self):
+        self.cache.systemids.endbulkmode()
 
     def duphash(self, data):
         data = str(data).encode('utf-8')
@@ -70,6 +76,53 @@ class EDACDB(object):
         #return hashlib.md5(data).digest().encode("base64")
         #return hashlib.md5(data).hexdigest()[0:15]
         #b'iMjj8tMyETkJqEszZ-dZJQ=='
+
+    def create_fdevidmodule_in_db(self, moddict):
+        # {'category': 'internal', 'edid': '128666704', 'class': '1',
+        # 'rating': 'E', 'entitlement': '', 'guidance': '', 'ship': '',
+        # 'mount': '', 'name': 'Frame Shift Drive Interdictor',
+        # 'edsymbol': 'Int_FSDInterdictor_Size1_Class1'}
+        # also eddbid
+        # Need to do lookups to resolve related items
+        # This for: group, ship, mount, guidance
+        # Get category reference for group
+        mycat = self.cache.modulecats.findoradd({
+                    'name': moddict.pop('category')
+                    })
+        groupdict = {
+            'name': moddict['group'],
+            'category': mycat
+        }
+        # Get group ref
+        moddict['group'] = self.cache.modulegroups.findoradd({
+                                'name': moddict['group'],
+                                'category': mycat
+                                }
+                            )
+        # Tidy field ref (can't use 'class')
+        moddict['cclass'] = moddict.pop('class')
+        # optional fields
+        if moddict['ship'] != '':         # '' == None ??
+            moddict['ship'] = self.cache.shiptypes.getidbyname(
+                                moddict['ship'])
+            # Show error if ship not found
+            if moddict['ship'] is None:
+                printerror('Error importing module, associated ship not known.')
+        if moddict['guidance'] is not '':         # '' == None ??
+            moddict['guidance'] = self.cache.modguidances.findoradd(
+                                    moddict['guidance'])
+        if moddict['mount'] != '':         # '' == None ??
+            moddict['mount'] = self.cache.modmounts.getidbyname(
+                                    moddict['mount'])
+        # Finally add or create the Module
+        result = self.cache.modules.findoradd(moddict)
+        if result is not None:
+            return True
+        else:
+            return False
+
+    def create_fdevidship_in_db(self, shipdict):
+        result = self.cache.shiptypes.findoradd(shipdict)
 
     def create_eddb_commodity_in_db(self, commodity):
         '''
@@ -95,13 +148,22 @@ class EDACDB(object):
 
     def startstationbulkmode(self):
         self.cache.stations.startbulkmode()
-        self.cache.stationcommodities.startbulkmode()
+        self.cache.stationimports.startbulkmode()
+        self.cache.stationexports.startbulkmode()
+        self.cache.stationprohibited.startbulkmode()
         self.cache.stationeconomies.startbulkmode()
+        self.cache.stationships.startbulkmode()
+        self.cache.stationmodules.startbulkmode()
+
 
     def endstationbulkmode(self):
-        self.cache.stations.endbulkmode()
-        self.cache.stationcommodities.endbulkmode()
+        self.cache.stationimports.endbulkmode()
+        self.cache.stationexports.endbulkmode()
+        self.cache.stationprohibited.endbulkmode()
         self.cache.stationeconomies.endbulkmode()
+        self.cache.stationships.endbulkmode()
+        self.cache.stationmodules.endbulkmode()
+        self.cache.stations.endbulkmode()
 
     def create_eddb_station_in_db(self, station):
         # Based on info from EDDB create or update a Station in DB
@@ -144,15 +206,20 @@ class EDACDB(object):
             for ctype in [imports, exports, prohibited]:
                 comdict = {
                     'station': newstationid,
-                    'imported': ctype is imports,
-                    'exported': ctype is exports,
-                    'prohibited': ctype is prohibited,
-                    'commodities': [
+                    'commodity': [
                         self.cache.commodities.getpkfromeddbname(commodity)
                         for commodity in ctype]
                 }
-                result = self.cache.stationcommodities.findoradd(comdict)
-                # Warning this result is True, False or None
+                if ctype is imports:
+                    result = self.cache.stationimports.findoradd(comdict)
+                    # Warning this result is True, False or None
+                if ctype is exports:
+                    result = self.cache.stationexports.findoradd(comdict)
+                    # Warning this result is True, False or None
+                if ctype is prohibited:
+                    result = self.cache.stationprohibited.findoradd(comdict)
+                    # Warning this result is True, False or None
+
 
             # Add economy joins
             ecodict = {
@@ -164,6 +231,29 @@ class EDACDB(object):
             }
             result = self.cache.stationeconomies.findoradd(ecodict)
             # Warning this result is True, False or None
+
+            # Add StationShip joins
+            shipdict = {
+                        'station': newstationid,
+                        'shiptype': [
+                            self.cache.shiptypes.getpkfromeddbname(shiptype)
+                            for shiptype in selling_ships
+                            ]
+                        }
+            result = self.cache.stationships.findoradd(shipdict)
+            # Warning this result is True, False or None
+
+            # Add StationModule joins
+            moddict = {
+                        'station': newstationid,
+                        'module': [
+                            self.cache.modules.getidbyeddbid(module)
+                            for module in selling_modules
+                            ]   # This could contain Nones
+                        }
+            result = self.cache.stationmodules.findoradd(moddict)
+            # Warning this result is True, False or None
+
 
 
     def startbodybulkmode(self):
@@ -342,6 +432,7 @@ class EDACDB(object):
         system['power_state'] = self.cache.powerstates.findoradd(system['power_state'])
         system['government'] = self.cache.governments.findoradd(system['government'])
         system['primary_economy'] = self.cache.economies.findoradd(system['primary_economy'])
+        #print(system)
         #
         hashdata = ""
         for key in sorted(system.keys()):

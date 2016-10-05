@@ -2,14 +2,16 @@ import time
 
 from django.shortcuts import render
 from django.shortcuts import get_object_or_404
-from django.db import transaction
+from django.db import transaction, connection
 from django.db import IntegrityError, OperationalError
+from django.db.models import Q
 from django.http import HttpResponse
 from django.forms.models import model_to_dict
 import json
 import cbor2 as cbor
 import sys
 import gc
+import ast
 
 from .models import CMDR, Ship, System
 from .models import ModuleSlot, HardpointMount
@@ -19,8 +21,11 @@ from .models import AtmosType, AtmosComponent
 from .models import BodyGroup, BodyType, VolcanismType, RingType, SolidType
 from .models import MaterialType, Body, SolidComposition, AtmosComposition
 from .models import MaterialComposition, Ring, CommodityCategory, Commodity
-from .models import StationType, Station, StationCommodity, StationEconomy
-from .models import StationShip, StationModule
+from .models import StationType, Station, StationEconomy
+from .models import StationShip, StationModule, ShipType, Module
+from .models import ModuleMountType, ModuleGuidanceType, ModuleCategory
+from .models import ModuleGroup, StationShip, StationModule, StationImport
+from .models import StationExport, StationProhibited
 from rest_framework import viewsets, views
 from rest_framework import status
 from rest_framework_bulk import BulkModelViewSet
@@ -46,14 +51,21 @@ from .serializers import BodySerializer, SolidCompositionSerializer
 from .serializers import MaterialCompositionSerializer, RingSerializer
 from .serializers import CommodityCategorySerializer, CommoditySerializer
 from .serializers import StationTypeSerializer, StationSerializer
-from .serializers import StationCommoditySerializer, StationEconomySerializer
+from .serializers import StationEconomySerializer
 from .serializers import StationShipSerializer, StationModuleSerializer
 from .serializers import AtmosCompositionBulkSerializer
 from .serializers import SolidCompositionBulkSerializer
 from .serializers import MaterialCompositionBulkSerializer
 from .serializers import RingBulkSerializer, BodyBulkSerializer
-from .serializers import StationBulkSerializer, StationCommodityBulkSerializer
-from .serializers import StationEconomyBulkSerializer
+from .serializers import StationBulkSerializer
+from .serializers import StationEconomyBulkSerializer, ShipTypeSerializer
+from .serializers import ModuleSerializer, ModuleMountTypeSerializer
+from .serializers import ModuleGuidanceTypeSerializer, ModuleCategorySerializer
+from .serializers import ModuleGroupSerializer, StationShipBulkSerializer
+from .serializers import StationImportSerializer, StationExportSerializer
+from .serializers import StationProhibitedSerializer, StationModuleBulkSerializer
+from .serializers import StationImportBulkSerializer, StationExportBulkSerializer
+from .serializers import StationProhibitedBulkSerializer
 
 
 
@@ -68,14 +80,24 @@ class UpdatingBulkViewSet(BulkModelViewSet):
 
     def create(self, request, *args, **kwargs):
         bulk = isinstance(request.data, list)
-
         if not bulk:
             return super(BulkCreateModelMixin, self).create(request, *args, **kwargs)
-
         else:
             serializer = self.get_serializer(data=request.data, many=True)
             serializer.is_valid(raise_exception=True)
-            self.perform_bulk_create(serializer)
+            retrycount = 20
+            while retrycount > 0:
+                try:
+                    self.perform_bulk_create(serializer)
+                    break
+                except OperationalError:
+                    # Try again
+                    print('Operational Error: DB Locked? Retrying...')
+                    time.sleep(0.5)
+                    retrycount -= 1
+                except Exception as exc:
+                    print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
+                    return HttpResponse(exc, status=400)
             return Response(len(serializer.data), status=status.HTTP_201_CREATED)
 
     def bulk_update(self, request, *args, **kwargs):
@@ -99,8 +121,21 @@ class UpdatingBulkViewSet(BulkModelViewSet):
             )
             if not item_serializer.is_valid():
                 validation_errors.append(item_serializer.errors)
-            result = self.get_queryset().filter(id=item['id']).update(
-                            **item_serializer.validated_data)
+            retrycount = 20
+            result = None
+            while retrycount > 0:
+                try:
+                    result = self.get_queryset().filter(id=item['id']).update(
+                                    **item_serializer.validated_data)
+                    break
+                except OperationalError:
+                    # Try again
+                    print('Operational Error: DB Locked? Retrying...')
+                    time.sleep(0.5)
+                    retrycount -= 1
+                except Exception as exc:
+                    print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
+                    return HttpResponse(exc, status=400)
             # results.append(result)
         if validation_errors:
             raise ValidationError(validation_errors)
@@ -132,6 +167,65 @@ class UpdatingBulkViewSet(BulkModelViewSet):
             self.get_queryset().filter(id=pk).delete()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CBORPackedItemView(views.APIView):
+    """
+    Optimised data dump of a Station join table.
+    For use as a subclass.
+    I've also added the capability to request of items by an arbitrary field
+    ?field=fieldname&v=123(etc)
+    """
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+    def getpackedlist(self, request, table=None, fields=None):
+        if table is None:
+            table = self.queryset.model
+            # print('Model is set to: %s' % table.__name__)
+        if fields is None:
+            fields = [f.name for f in table._meta.get_fields()
+                      if f.concrete and (
+                        not f.is_relation
+                        or f.one_to_one
+                        or (f.many_to_one and f.related_model)
+                        )]
+            # print(fields)
+        # Check for filtering
+        filterfield = request.GET.get('field')
+        filtervalues = request.GET.get('v')
+        myobjects = table.objects
+        if (filterfield and filtervalues) is not None:
+            filtervalues = filtervalues.split(',')
+            myfilterqs = Q()
+            for value in filtervalues:
+                 myfilterqs = myfilterqs | Q(**{filterfield:value})
+            myobjects = myobjects.filter(myfilterqs)
+        count = myobjects.count()
+        # print(count)
+        offset = int(request.GET.get('offset', 0))
+        limit = int(request.GET.get('limit', 9999)) + offset
+        items = myobjects.values(*fields)[offset:limit]
+        # optimise by changing to a long list.
+        list_items = []
+        noofitems = len(items)
+        if noofitems > 0:
+                list_headers = [header for header in sorted(items[0].keys())]
+                list_items = [
+                                [entry[header] for header in list_headers]
+                                 for entry in items]
+                list_items = [len(list_headers)] + list_headers + list_items
+        response = {
+            'count': count,
+            'results': list_items
+        }
+        #print('CBOR Packer returning %d/%d items, tot. length %d'
+        #      % (noofitems, count, len(list_items)))
+        return response
+
+    def get(self, request, format=None):
+        response = self.getpackedlist(request)
+        return Response(response, content_type='application/cbor')
 
 
 class CMDRViewSet(viewsets.ModelViewSet):
@@ -179,6 +273,185 @@ class HardpointMountViewSet(viewsets.ModelViewSet):
     serializer_class = HardpointMountSerializer
 
 
+class ShipTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ship Types to be viewed or edited.
+    """
+    queryset = ShipType.objects.all()
+    serializer_class = ShipTypeSerializer
+
+
+class CBORShipTypeView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationEconomy join table.
+    """
+    queryset = ShipType.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class ModuleMountTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Module Mount Types to be viewed or edited.
+    """
+    queryset = ModuleMountType.objects.all()
+    serializer_class = ModuleMountTypeSerializer
+
+
+class ModuleGuidanceTypeViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Module Mount Types to be viewed or edited.
+    """
+    queryset = ModuleGuidanceType.objects.all()
+    serializer_class = ModuleGuidanceTypeSerializer
+
+
+class ModuleGroupViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows ModuleGroup to be viewed or edited.
+    """
+    queryset = ModuleGroup.objects.all()
+    serializer_class = ModuleGroupSerializer
+
+
+class CBORModuleGroupView(CBORPackedItemView):
+    """
+    Optimised data dump of the ModuleCategory join table.
+    """
+    queryset = ModuleGroup.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class ModuleCategoryViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows ModuleCategory to be viewed or edited.
+    """
+    queryset = ModuleCategory.objects.all()
+    serializer_class = ModuleCategorySerializer
+
+
+class CBORModuleCategoryView(CBORPackedItemView):
+    """
+    Optimised data dump of the ModuleCategory join table.
+    """
+    queryset = ModuleCategory.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class ModuleViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = Module.objects.all()
+    serializer_class = ModuleSerializer
+
+
+class CBORModuleView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationEconomy join table.
+    """
+    queryset = Module.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class SuperStationModuleBulkViewSet(views.APIView):
+
+    """
+    A hidden API endpoint that allows Modules Stations joins
+    to be bulk updated or created
+    """
+    queryset = StationModule.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # serializer_class = StationModuleSerializer  # I don't think I actually use one.
+    # TODO control Bulk Deletes
+
+    # Stripped down for initial load events
+
+    def put(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        print('StationModuleBulkViewSet update called.')
+        return self.create(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        # print('StationModuleBulkViewSet create called.')
+        # If we assume the data is good...
+        # because we already checked it in EDACAPI Wrapper
+        # It's a list of dict object - should be directly insertable in the DB
+        # We just need to find the related objects and put them in the dict
+        # print('Looking up related objects')
+        # Load the related tables in full as there are lots+ objects in dict
+
+        #
+        # All wrapped in a try because there could be issues outside of our
+        # control doing this...
+        updating = False
+        print('StationModuleBulkViewSet checking for update or create.')
+        # Sample first item
+        if 'pk' in request.data[0]:
+            updating = True
+        if updating is True:
+            print('StationModuleBulkViewSet preloading modules.')
+            b1 = bool(Module.objects.all())
+            b2 = bool(Station.objects.all())
+            try:
+                for thisdict in request.data:
+                    thisdict['id'] = thisdict.pop('pk')     # Why why why ?????
+                    thisdict['module'] = Module.objects.get(pk=thisdict['module'])
+                    thisdict['station'] = Station.objects.get(pk=thisdict['station'])
+            except Exception as exc:
+                print(exc)
+                return Response(exc, status=status.HTTP_400_BAD_REQUEST)
+            retrycount = 120
+            for thisitem in request.data:
+                while retrycount > 0:
+                    try:
+                        StationModule.objects.filter(id=thisitem['id']).update(**thisitem)
+                        break
+                    except OperationalError:
+                        # Try again
+                        print('Operational Error: DB Locked?, retrying')
+                        time.sleep(0.5)
+                        retrycount -= 1
+                    except Exception as exc:
+                        print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
+                        return HttpResponse(str(exc), status=400)
+        else:
+            try:
+                # StationModule.objects.bulk_create([StationModule(**thisdict) for thisdict in request.data])
+                # Try raw
+                # print('Attempting direct inserts.')
+                cursor = connection.cursor()
+                query = ''' INSERT INTO edacapi_stationmodule
+                            (station_id, module_id)
+                            VALUES (%s,%s) '''
+                querylist = [(thisdict['station'], thisdict['module']) for
+                            thisdict in request.data
+                            ]
+                with transaction.atomic():
+                    cursor.executemany(query, querylist)
+                connection.commit()             # Not sure if this is required.
+            except OperationalError:
+                # Try again
+                print('Operational Error: DB Locked?, retrying')
+                time.sleep(2)
+                with transaction.atomic():
+                    cursor.executemany(query, querylist)
+                connection.commit()
+            except Exception as exc:
+                print(exc)
+                return Response(str(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class SystemViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Systems to be viewed or edited.
@@ -193,7 +466,8 @@ class SystemViewSet(viewsets.ModelViewSet):
 class SystemBulkCreateViewSet(views.APIView):
 
     """
-    A hidden API endpoint that allows Systems to be bulk created.
+    A hidden API endpoint that allows Systems to be bulk created reasonably
+    quickly....
     """
     queryset = System.objects.all()
     renderer_classes = (CBORRenderer, )
@@ -210,6 +484,7 @@ class SystemBulkCreateViewSet(views.APIView):
         # If we assume the data is good...
         # because we already checked it in EDACAPI Wrapper
         # It's a list of dict object - should be directly insertable in the DB
+        '''
         # We just need to find the related objects and put them in the dict
         # print('Looking up related objects')
         # Load the related tables in full as there are 8000+ objects in dict
@@ -246,9 +521,16 @@ class SystemBulkCreateViewSet(views.APIView):
             print(exc)
             return Response(exc, status=status.HTTP_400_BAD_REQUEST)
         # print('Doing Bulk Save')
+        '''
+        idstrings = ['security', 'state', 'allegiance', 'faction', 'power',
+                     'government', 'power_state', 'primary_economy']
+        for thisdict in request.data:
+            for idstring in idstrings:
+                newid = idstring + '_id'
+                thisdict[newid] = thisdict.pop(idstring)
         try:
             System.objects.bulk_create([System(**thisdict) for thisdict in request.data])
-        except:
+        except Exception as exc:
             print(exc)
             return Response(exc, status=status.HTTP_400_BAD_REQUEST)
         # print('Returning Response')
@@ -276,42 +558,13 @@ class SystemBulkUpdateViewSet(views.APIView):
         # If we assume the data is good...
         # because we already checked it in EDACAPI Wrapper
         # It's a list of dict object - should be directly insertable in the DB
-        # We just need to find the related objects and put them in the dict
-        # print('Looking up related objects')
-        # Load the related tables in full as there are 8000+ objects in dict
-        bool(SecurityLevel.objects.all())
-        bool(State.objects.all())
-        bool(Allegiance.objects.all())
-        bool(Faction.objects.all())
-        bool(Power.objects.all())
-        bool(Government.objects.all())
-        bool(PowerState.objects.all())
-        bool(Economy.objects.all())
-        #
-        # All wrapped in a try because there could be issues outside of our
-        # control doing this...
-        try:
-            for thisdict in request.data:
-                thisdict['id'] = thisdict.pop('pk')     # Why why why ?????
-                if thisdict['security'] is not None:
-                    thisdict['security'] = SecurityLevel.objects.get(pk=thisdict['security'])
-                if thisdict['state'] is not None:
-                    thisdict['state'] = State.objects.get(pk=thisdict['state'])
-                if thisdict['allegiance'] is not None:
-                    thisdict['allegiance'] = Allegiance.objects.get(pk=thisdict['allegiance'])
-                if thisdict['faction'] is not None:
-                    thisdict['faction'] = Faction.objects.get(pk=thisdict['faction'])
-                if thisdict['power'] is not None:
-                    thisdict['power'] = Power.objects.get(pk=thisdict['power'])
-                if thisdict['government'] is not None:
-                    thisdict['government'] = Government.objects.get(pk=thisdict['government'])
-                if thisdict['power_state'] is not None:
-                    thisdict['power_state'] = PowerState.objects.get(pk=thisdict['power_state'])
-                if thisdict['primary_economy'] is not None:
-                    thisdict['primary_economy'] = Economy.objects.get(pk=thisdict['primary_economy'])
-        except Exception as exc:
-            print(exc)
-            return Response(exc, status=status.HTTP_400_BAD_REQUEST)
+        idstrings = ['security', 'state', 'allegiance', 'faction', 'power',
+                     'government', 'power_state', 'primary_economy']
+        for thisdict in request.data:
+            thisdict['id'] = thisdict.pop('pk')
+            for idstring in idstrings:
+                newid = idstring + '_id'
+                thisdict[newid] = thisdict.pop(idstring)
         # print('Doing Bulk Save')
         #System.objects.bulk_create([System(**thisdict) for thisdict in request.data])
         retrycount = 120
@@ -331,7 +584,6 @@ class SystemBulkUpdateViewSet(views.APIView):
         # print('Returning Response')
         # Should really put some stuff in here.
         return Response(status=status.HTTP_204_NO_CONTENT)
-
 
 
 class SystemIDViewSet(viewsets.ReadOnlyModelViewSet):
@@ -358,7 +610,7 @@ class IgnoreClientContentNegotiation(BaseContentNegotiation):
 
 class CBORSysIDListView(views.APIView):
     """
-    A view that returns the count of active users in JSON.
+    A view that returns the count of active users in CBOR.
     """
     queryset = System.objects.all()
     renderer_classes = (CBORRenderer, )
@@ -425,6 +677,19 @@ class FastSysIDListView(views.APIView):
         # serializer = SystemIDSerializer(systems)
         return HttpResponse(mycbor, content_type='application/cbor; charset=utf-8')
 
+
+class CBORSysIDView(CBORPackedItemView):
+    """
+    Optimised data dump of the ModuleCategory join table.
+    """
+    queryset = System.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+    def get(self, request, format=None):
+        fields = ('pk', 'edsmid', 'eddbid', 'duphash')
+        response = self.getpackedlist(request, fields=fields)
+        return Response(response, content_type='application/cbor')
 
 class SecurityLevelViewSet(viewsets.ModelViewSet):
     """
@@ -536,6 +801,15 @@ class AtmosCompositionBulkViewSet(UpdatingBulkViewSet):
     # TODO control Bulk Deletes
 
 
+class CBORAtmosCompositionView(CBORPackedItemView):
+    """
+    Optimised data dump of the ModuleCategory join table.
+    """
+    queryset = AtmosComposition.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
 class BodyGroupViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
@@ -622,6 +896,14 @@ class SolidCompositionBulkViewSet(UpdatingBulkViewSet):
     # TODO control Bulk Deletes
 
 
+class CBORSolidCompositionView(CBORPackedItemView):
+    """
+    Optimised data dump of the ModuleCategory join table.
+    """
+    queryset = SolidComposition.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
 
 class MaterialCompositionViewSet(viewsets.ModelViewSet):
     """
@@ -640,6 +922,15 @@ class MaterialCompositionBulkViewSet(UpdatingBulkViewSet):
     renderer_classes = (CBORRenderer, )
     parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
+
+
+class CBORMaterialCompositionView(CBORPackedItemView):
+    """
+    Optimised data dump of the ModuleCategory join table.
+    """
+    queryset = MaterialComposition.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
 
 
 class RingViewSet(viewsets.ModelViewSet):
@@ -661,6 +952,15 @@ class RingBulkViewSet(UpdatingBulkViewSet):
     # TODO control Bulk Deletes
 
 
+class CBORRingView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationEconomy join table.
+    """
+    queryset = Ring.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
 class CommodityCategoryViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
@@ -675,6 +975,15 @@ class CommodityViewSet(viewsets.ModelViewSet):
     """
     queryset = Commodity.objects.all()
     serializer_class = CommoditySerializer
+
+
+class CBORCommodityView(CBORPackedItemView):
+    """
+    Optimised data dump of the Commodity table.
+    """
+    queryset = Commodity.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
 
 
 class StationTypeViewSet(viewsets.ModelViewSet):
@@ -704,23 +1013,97 @@ class StationBulkViewSet(UpdatingBulkViewSet):
     # TODO control Bulk Deletes
 
 
-class StationCommodityViewSet(viewsets.ModelViewSet):
+class CBORStationView(CBORPackedItemView):
+    """
+    Optimised data dump of the Station table.
+    """
+    queryset = Station.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class StationImportViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
     """
-    queryset = StationCommodity.objects.all()
-    serializer_class = StationCommoditySerializer
+    queryset = StationImport.objects.all()
+    serializer_class = StationImportSerializer
 
 
-class StationCommodityBulkViewSet(UpdatingBulkViewSet):
+class StationImportBulkViewSet(UpdatingBulkViewSet):
     """
     API endpoint that allows Factions to be bulk viewed or edited.
     """
-    queryset = StationCommodity.objects.all()
-    serializer_class = StationCommodityBulkSerializer
+    queryset = StationImport.objects.all()
+    serializer_class = StationImportBulkSerializer
     renderer_classes = (CBORRenderer, )
     parser_classes = (CBORParser, )
     # TODO control Bulk Deletes
+
+
+class CBORStationImportView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationEconomy join table.
+    """
+    queryset = StationImport.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class StationExportViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = StationExport.objects.all()
+    serializer_class = StationExportSerializer
+
+
+class StationExportBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = StationExport.objects.all()
+    serializer_class = StationExportBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
+class CBORStationExportView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationEconomy join table.
+    """
+    queryset = StationExport.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class StationProhibitedViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Ships to be viewed or edited.
+    """
+    queryset = StationProhibited.objects.all()
+    serializer_class = StationProhibitedSerializer
+
+
+class StationProhibitedBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = StationProhibited.objects.all()
+    serializer_class = StationProhibitedBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
+class CBORStationProhibitedView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationEconomy join table.
+    """
+    queryset = StationProhibited.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
 
 
 class StationEconomyViewSet(viewsets.ModelViewSet):
@@ -742,6 +1125,15 @@ class StationEconomyBulkViewSet(UpdatingBulkViewSet):
     # TODO control Bulk Deletes
 
 
+class CBORStationEconomyView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationEconomy join table.
+    """
+    queryset = StationEconomy.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
 class StationShipViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
@@ -750,9 +1142,49 @@ class StationShipViewSet(viewsets.ModelViewSet):
     serializer_class = StationShipSerializer
 
 
+class StationShipBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = StationShip.objects.all()
+    serializer_class = StationShipBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
+class CBORStationShipView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationShip join table.
+    """
+    queryset = StationShip.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
 class StationModuleViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
     """
     queryset = StationModule.objects.all()
     serializer_class = StationModuleSerializer
+
+
+class StationModuleBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows Factions to be bulk viewed or edited.
+    """
+    queryset = StationModule.objects.all()
+    serializer_class = StationModuleBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
+class CBORStationModuleView(CBORPackedItemView):
+    """
+    Optimised data dump of the StationModule join table.
+    """
+    queryset = StationModule.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )

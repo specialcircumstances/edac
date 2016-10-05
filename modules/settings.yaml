@@ -6,6 +6,9 @@ sourcefiles:
   eddbstationsfile: 'modules/eddb-data/stations.jsonl'
   eddbsystemsfile: 'modules/eddb-data/systems.jsonl'
   eddbpopulatedsystemsfile: 'modules/eddb-data/systems_populated.jsonl'
+  fdevidshipyard: 'modules/FDevIDs/shipyard.csv'
+  fdevidoutfitting: 'modules/FDevIDs/outfitting.csv'
+  fdevidcommodity: 'modules/FDevIDs/commodity.csv'
 
 sourceurls:
   bodies: "https://eddb.io/archive/v4/bodies.jsonl"

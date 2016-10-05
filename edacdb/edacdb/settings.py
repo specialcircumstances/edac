@@ -146,6 +146,8 @@ USE_L10N = True
 
 USE_TZ = True
 
+# DJANGO 1.10 limits to 1000, but I need MORE
+DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/1.10/howto/static-files/

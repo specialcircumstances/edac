@@ -9,6 +9,20 @@ try:
 except:
     import constants
 
+DEBUG = True
+ERROR = True
+VERSION = '2.2 Beta'
+
+
+def printdebug(mystring):
+    if DEBUG is True:
+        print("DEBUG config: %s" % mystring)
+
+
+def printerror(mystring):
+    if ERROR is True:
+        print("ERROR config: %s" % mystring)
+
 
 class Settings(object):
 
@@ -62,6 +76,6 @@ configfile = os.path.join(os.path.dirname(__file__),
                           constants.configfile())
 with open(configfile, "r") as f:
     __CF__ = yaml.load(f)
-print('Loaded settings file: %s' % constants.configfile())
+printdebug('Loaded settings file: %s' % constants.configfile())
 settings = Settings()
 env = Environment()

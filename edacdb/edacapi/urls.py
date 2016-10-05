@@ -38,10 +38,18 @@ router.register(r'commoditycats', views.CommodityCategoryViewSet)
 router.register(r'commodities', views.CommodityViewSet)
 router.register(r'stationtypes', views.StationTypeViewSet)
 router.register(r'stations', views.StationViewSet)
-router.register(r'stationcommodities', views.StationCommodityViewSet)
+router.register(r'stationimports', views.StationImportViewSet)
+router.register(r'stationexports', views.StationExportViewSet)
+router.register(r'stationprohibited', views.StationProhibitedViewSet)
 router.register(r'stationeconomies', views.StationEconomyViewSet)
 router.register(r'stationships', views.StationShipViewSet)
-router.register(r'stationsmodules', views.StationModuleViewSet)
+router.register(r'stationmodules', views.StationModuleViewSet)
+router.register(r'shiptypes', views.ShipTypeViewSet)
+router.register(r'modules', views.ModuleViewSet)
+router.register(r'modulecats', views.ModuleCategoryViewSet)
+router.register(r'modulegroups', views.ModuleGroupViewSet)
+router.register(r'modguidances', views.ModuleGuidanceTypeViewSet)
+router.register(r'modmounts', views.ModuleMountTypeViewSet)
 
 
 bulkrouter = BulkRouter(schema_title='EDACD API Bulk Schema',
@@ -58,13 +66,18 @@ bulkrouter.register(r'materialcomposition',
 bulkrouter.register(r'rings', views.RingBulkViewSet, 'bulkrings')
 bulkrouter.register(r'bodies', views.BodyBulkViewSet, 'bulkbodies')
 bulkrouter.register(r'stations', views.StationBulkViewSet, 'bulkstations')
-bulkrouter.register(r'stationcommodities', views.StationCommodityBulkViewSet,
-                    'bulkstationcommodities')
+bulkrouter.register(r'stationimports', views.StationImportBulkViewSet,
+                    'bulkstationimports')
+bulkrouter.register(r'stationexports', views.StationExportBulkViewSet,
+                    'bulkstationexports')
+bulkrouter.register(r'stationprohibited', views.StationProhibitedBulkViewSet,
+                    'bulkstationprohibited')
 bulkrouter.register(r'stationeconomies', views.StationEconomyBulkViewSet,
                     'stationeconomies')
-
-
-
+bulkrouter.register(r'stationships', views.StationShipBulkViewSet,
+                    'stationships')
+bulkrouter.register(r'stationmodules', views.StationModuleBulkViewSet,
+                    'stationmodules')
 
 
 # Wire up our API using automatic URL routing.
@@ -74,7 +87,25 @@ urlpatterns = [
     url(r'^bulk/', include(bulkrouter.urls)),
     # url(r'^bulk/cbor/systemids/', views.FastSysIDListView.as_view()),
     url(r'^bulk/cbor/cborsystemids/', views.CBORSysIDListView.as_view()),
+    url(r'^bulk/cbor/systemids/', views.CBORSysIDView.as_view()),
+    url(r'^bulk/cbor/stationeconomies/', views.CBORStationEconomyView.as_view()),
+    url(r'^bulk/cbor/atmoscomposition/', views.CBORAtmosCompositionView.as_view()),
+    url(r'^bulk/cbor/solidcomposition/', views.CBORSolidCompositionView.as_view()),
+    url(r'^bulk/cbor/materialcomposition/', views.CBORMaterialCompositionView.as_view()),
+    url(r'^bulk/cbor/stationships/', views.CBORStationShipView.as_view()),
+    url(r'^bulk/cbor/stationmodules/', views.CBORStationModuleView.as_view()),
+    url(r'^bulk/cbor/stationimports/', views.CBORStationImportView.as_view()),
+    url(r'^bulk/cbor/stationexports/', views.CBORStationExportView.as_view()),
+    url(r'^bulk/cbor/stationprohibited/', views.CBORStationProhibitedView.as_view()),
+    url(r'^bulk/cbor/rings/', views.CBORRingView.as_view()),
+    url(r'^bulk/cbor/commodities/', views.CBORCommodityView.as_view()),
+    url(r'^bulk/cbor/modules/', views.CBORModuleView.as_view()),
+    url(r'^bulk/cbor/modulecats/', views.CBORModuleCategoryView.as_view()),
+    url(r'^bulk/cbor/modulegroups/', views.CBORModuleGroupView.as_view()),
+    url(r'^bulk/cbor/shiptypes/', views.CBORShipTypeView.as_view()),
+    url(r'^bulk/cbor/stations/', views.CBORStationView.as_view()),
     url(r'^bulk/bcreatesystems/', views.SystemBulkCreateViewSet.as_view()),
     url(r'^bulk/bupdatesystems/', views.SystemBulkUpdateViewSet.as_view()),
+    url(r'^bulk/bstationmodules/', views.SuperStationModuleBulkViewSet.as_view()),    # no idea why needed for this one!
     url(r'^api-auth/', include('rest_framework.urls', namespace='rest_framework'))
 ]

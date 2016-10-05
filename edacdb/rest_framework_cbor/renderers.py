@@ -6,11 +6,11 @@ https://pypi.org/project/cbor2/
 
 '''
 
-#import msgpack
-import cbor2        # In my tests this appeared to give better perf than cbor
+import cbor2 as cbor       # In my tests this appeared to give better perf than cbor
 import decimal
 import datetime
-import sys # temp
+import sys      # temp??
+import gc
 
 from rest_framework.renderers import BaseRenderer
 
@@ -19,6 +19,7 @@ class CBOREncoder(object):
 
     def encode(self, obj):
         # I think this might not be necessary with the CBOR2 encoder
+        # I'm not using it, but include it for future reference
         if isinstance(obj, datetime.datetime):
             return {'__class__': 'datetime', 'as_str': obj.isoformat()}
         elif isinstance(obj, datetime.date):
@@ -46,9 +47,10 @@ class CBORRenderer(BaseRenderer):
         if data is None:
             return ''
         # print('START CBOR RENDER')
-        # print(sys.getsizeof(data))
-        outdata = cbor2.dumps(data)
-        # print(sys.getsizeof(outdata))
-        # print('FINISH CBOR RENDER')
-        return outdata
-        #  return cbor2.dumps(data)
+        #gc.collect()
+        #insize = sys.getsizeof(data)
+        #outdata = cbor.dumps(data)
+        #outsize = sys.getsizeof(outdata)
+        #print('CBOR render from %d to %d' % (insize, outsize))
+        #return outdata
+        return cbor.dumps(data)

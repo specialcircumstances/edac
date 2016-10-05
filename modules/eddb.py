@@ -217,6 +217,7 @@ class Systems(object):
         if isfile(filepath):
             printdebug('%s found. Starting to load EDDB data.' % filepath)
             self.timestart = time.clock()
+            self.dbapi.startsystemidbulkmode()
             if True:
                 with open(filepath, 'r', encoding='utf-8') as myfile:
                     for line in myfile:
@@ -233,6 +234,8 @@ class Systems(object):
                             item['reserve_type']  = ''
                         if item['simbad_ref'] is None:
                             item['simbad_ref'] = ''
+                        # Gobble state_id as we already lookup on state
+                        item.pop('state_id')
                         if self.dbapi.create_system_in_db(item) is True:
                             self.systems_changed += 1
                         if self.systems_count % 10000 == 0:
@@ -244,7 +247,7 @@ class Systems(object):
                                     self.systems_changed, crate),
                                     end='')
                     myfile.close
-                    self.dbapi.create_system_bulk_flush()
+                    # bulkself.dbapi.create_system_bulk_flush()
                 seconds = int(time.clock() - self.timestart)
                 srate = (self.systems_count + 1) / (seconds + 1)
                 crate = (self.systems_changed + 1) / (seconds + 1)
@@ -256,9 +259,10 @@ class Systems(object):
                 # Need to reload the SystemID cache if anything changed
                 # As the bulk updater doesn't currently update the cache contents
                 # TODO
-                if self.systems_changed > 0:
-                    printdebug('Reloading SystemID Cache')
-                    self.dbapi.cache.systemids.refresh()
+                #if self.systems_changed > 0:
+                #    printdebug('Reloading SystemID Cache')
+                #    self.dbapi.cache.systemids.refresh()
+                self.dbapi.endsystemidbulkmode()
                 #self.data_load_process()
                 #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
                 self.loaded = True  # TODO better checks here
@@ -548,14 +552,17 @@ class Stations(object):
 if __name__ == '__main__':
     #import_listings()
     #print('Listings count is: %d' % listings_count)
+    starttime = time.gmtime()
     print(time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()))
     dbapi = EDACDB()
-    mydevids = FDevIDs(dbapi)
-    #mysystems = Systems(dbapi)
-    #mybodies = Bodies(dbapi)
-    #mycommodities = Commodities(dbapi)
+    # mydevids = FDevIDs(dbapi) this won't work yet
+    mysystems = Systems(dbapi)
+    mybodies = Bodies(dbapi)
+    mycommodities = Commodities(dbapi)
     mystations = Stations(dbapi)
-    print(time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()))
+    endtime = time.gmtime()
+    print(time.strftime("%a, %d %b %Y %H:%M:%S +0000", starttime))
+    print(time.strftime("%a, %d %b %Y %H:%M:%S +0000", endtime))
     #print(mysystems.lastsystem)
     #print(mysystems.types)
     #max_len =  0
