@@ -23,6 +23,8 @@ import copy
 from multiprocessing import Process, Queue, JoinableQueue
 from coreapi.compat import b64encode
 from urllib import parse as parse
+# import numpy
+import math
 try:
     from modules.edacdb_cache import DBCache
 except:
@@ -50,15 +52,76 @@ def printerror(mystring):
     if ERROR is True:
         print("ERROR edacdb_wrapper: %s" % mystring)
 
+class SystemFilter(object):
+
+    # For reference
+    def fastest_calc_dist(p1,p2):
+        return math.sqrt((p2[0] - p1[0]) ** 2 +
+                         (p2[1] - p1[1]) ** 2 +
+                         (p2[2] - p1[2]) ** 2)
+
+    def aoitest(self, system):
+        # Areas of Interest
+        # Return True if we should filter, ie if the test fails
+        if len(self.aois) == 0:
+            return True
+        #c1 = numpy.array((system['coord_x'], system['coord_y'], system['coord_z']))
+        for aoi in self.aois:
+            # Test if inside cube (quick)
+            if abs(system['coord_z'] - aoi['z']) > aoi['r']:
+                self.aoistatz += 1
+                continue
+            if abs(system['coord_x'] - aoi['x']) > aoi['r']:
+                self.aoistatx += 1
+                continue
+            if abs(system['coord_y'] - aoi['y']) > aoi['r']:
+                self.aoistaty += 1
+                continue
+            # if pass then test if inside sphere (not as quick)
+            #c2 = numpy.array((aoi['x'], aoi['y'], aoi['z']))
+            #d = numpy.linalg.norm(c1-c2)
+            d = math.sqrt((system['coord_z'] - aoi['z']) ** 2 +
+                          (system['coord_x'] - aoi['x']) ** 2 +
+                          (system['coord_y'] - aoi['y']) ** 2)
+            if d <= aoi['r']:
+                self.aoistatr += 1
+                # In AOI
+                return False
+        self.aoistatn += 1
+        return True
+
+    def __init__(self):
+        # Object to hold filter options neatly
+        # defaults as below
+        # Multiple may be set, checked in order.
+        self.allobjects = False          # If true load all objects
+        #
+        self.populated = True           # If true load populated objects
+        self.unpopulated = False         # If trye load unpopulated objects
+        #
+        self.aoi = True                 # Areas of Interest
+        self.aois = [                   # List of AOIs
+            {'x': 0.0, 'y': 0.0, 'z': 0.0, 'r': 300},    # x,y,z of centre + dist of sphere in ly
+            {'x': -9530.5, 'y': -910.28125, 'z': 19808.125, 'r': 100},  # Eol Prou RS-T d3-94
+            {'x': -78.59375, 'y': -149.625, 'z': -340.53125, 'r': 100},  # Merope
+                    ]
+        self.aoistatx = 0
+        self.aoistaty = 0
+        self.aoistatz = 0
+        self.aoistatr = 0
+        self.aoistatn = 0
+
+
 
 class EDACDB(object):
     # primary object
-    # http://www.coreapi.org/specification/document/
+    def printaoistats(self):
+        printdebug('AOI X exclusions: %d' % self.filteropt.aoistatx)
+        printdebug('AOI Y exclusions: %d' % self.filteropt.aoistaty)
+        printdebug('AOI Z exclusions: %d' % self.filteropt.aoistatz)
+        printdebug('AOI Radius inclusion: %d' % self.filteropt.aoistatr)
+        printdebug('AOI Fallthrough exclusions: %d' % self.filteropt.aoistatn)
 
-    #def create_system_bulk_flush(self):
-        # Should be called when using bulk update method
-        # to ensure anything not sent is sent before object deleted
-        #self.cache.systemids.flushbulkupdate()
 
     def startsystemidbulkmode(self):
         self.cache.systemids.startbulkmode()
@@ -147,6 +210,7 @@ class EDACDB(object):
         result = self.cache.commodities.findoradd(commodity)
 
     def startstationbulkmode(self):
+        # The order matters
         self.cache.stations.startbulkmode()
         self.cache.stationimports.startbulkmode()
         self.cache.stationexports.startbulkmode()
@@ -155,17 +219,18 @@ class EDACDB(object):
         self.cache.stationships.startbulkmode()
         self.cache.stationmodules.startbulkmode()
 
-
     def endstationbulkmode(self):
+        # The order matters
+        self.cache.stations.endbulkmode()
         self.cache.stationimports.endbulkmode()
         self.cache.stationexports.endbulkmode()
         self.cache.stationprohibited.endbulkmode()
         self.cache.stationeconomies.endbulkmode()
         self.cache.stationships.endbulkmode()
         self.cache.stationmodules.endbulkmode()
-        self.cache.stations.endbulkmode()
 
-    def create_eddb_station_in_db(self, station):
+    def create_eddb_station_in_db(self, istation):
+        station = copy.copy(istation)
         # Based on info from EDDB create or update a Station in DB
         #
         # Forign keys are system, faction, government, allegiance
@@ -185,6 +250,28 @@ class EDACDB(object):
                                     'eddbid': station.pop('type_id'),
                                     'name': station.pop('type')
                                 })
+        # Make a hash, including join data values
+        hashdata = ""
+        for key in sorted(station.keys()):
+            hashdata += str(station[key])
+        station['duphash'] = self.duphash(hashdata)
+        # Load the station (if required)
+        newstationid = self.cache.stations.findoradd(station)
+        if type(newstationid) is int:
+            return False
+        else:
+            return True
+
+    def create_eddb_stationjoins_in_db(self, istation):
+        # Based on info from EDDB create or update a Station in DB
+        #
+        # Forign keys are system, faction, government, allegiance
+        # state, stationtype
+        # Make commodities                  # For new stations will require 2nd
+                                            # run
+        # Check for bulk station creation and cache readiness
+        station = copy.copy(istation)
+        newstationid = self.cache.stations.getpkfromeddbid(station['eddbid'])
         # Pop any lists we need separated
         imports = station.pop('import_commodities')
         exports = station.pop('export_commodities')
@@ -192,17 +279,12 @@ class EDACDB(object):
         economies = station.pop('economies')
         selling_ships = station.pop('selling_ships')
         selling_modules = station.pop('selling_modules')
-        #
-        # TODO findoradd station
-        hashdata = ""
-        for key in sorted(station.keys()):
-            hashdata += str(station[key])
-        station['duphash'] = self.duphash(hashdata)
-        newstationid = self.cache.stations.findoradd(station)
-        # Make commodities                  # For new stations will require 2nd
-                                            # run
-        # temp
-        if newstationid is not None:        # Allow for bulk station creation
+        # Note that the join caches must be at least partially loaded
+        # otherwise there could be collisions, this should be done by cache
+        # but needs our cooperation, in that the caller must bulk stop then
+        # bulk start between station loads and station join loads
+        changed = False
+        if newstationid is not None:
             for ctype in [imports, exports, prohibited]:
                 comdict = {
                     'station': newstationid,
@@ -213,14 +295,18 @@ class EDACDB(object):
                 if ctype is imports:
                     result = self.cache.stationimports.findoradd(comdict)
                     # Warning this result is True, False or None
+                    if result is True:
+                        changed = True
                 if ctype is exports:
                     result = self.cache.stationexports.findoradd(comdict)
                     # Warning this result is True, False or None
+                    if result is True:
+                        changed = True
                 if ctype is prohibited:
                     result = self.cache.stationprohibited.findoradd(comdict)
                     # Warning this result is True, False or None
-
-
+                    if result is True:
+                        changed = True
             # Add economy joins
             ecodict = {
                     'station': newstationid,
@@ -230,8 +316,9 @@ class EDACDB(object):
                         ]
             }
             result = self.cache.stationeconomies.findoradd(ecodict)
+            if result is True:
+                changed = True
             # Warning this result is True, False or None
-
             # Add StationShip joins
             shipdict = {
                         'station': newstationid,
@@ -242,7 +329,8 @@ class EDACDB(object):
                         }
             result = self.cache.stationships.findoradd(shipdict)
             # Warning this result is True, False or None
-
+            if result is True:
+                changed = True
             # Add StationModule joins
             moddict = {
                         'station': newstationid,
@@ -253,32 +341,35 @@ class EDACDB(object):
                         }
             result = self.cache.stationmodules.findoradd(moddict)
             # Warning this result is True, False or None
-
-
+            if result is True:
+                changed = True
+        return changed
 
     def startbodybulkmode(self):
+        self.cache.bodies.startbulkmode()
         self.cache.atmoscomposition.startbulkmode()
         self.cache.solidcomposition.startbulkmode()
         self.cache.materialcomposition.startbulkmode()
         self.cache.rings.startbulkmode()
-        self.cache.bodies.startbulkmode()
 
     def endbodybulkmode(self):
+        self.cache.bodies.endbulkmode()
         self.cache.atmoscomposition.endbulkmode()
         self.cache.solidcomposition.endbulkmode()
         self.cache.materialcomposition.endbulkmode()
         self.cache.rings.endbulkmode()
-        self.cache.bodies.endbulkmode()
 
-    def create_eddb_body_in_db(self, body):
+    def create_eddb_body_in_db(self, ibody):
         # find or add will add to db if necessary and refresh
         # This replaces eddb lookups with our own
         # Simple bits first
         # Check if related system is in our DB
         # printdebug('Simple Lookups')
+        body = copy.copy(ibody)
         if self.cache.systemids.eddbidexists(body['system_id']) is False:
-            printerror('EDDB System ID (%d) is unknown in EDDB bodies import.'
-                       % body['system_id'])
+            # We will ASSUME we chose not to load this
+            # printerror('EDDB System ID (%d) is unknown in EDDB bodies import.'
+            #           % body['system_id'])
             return False
         #
         body['system'] = self.cache.systemids.getpkfromeddbid(body['system_id'])
@@ -303,69 +394,53 @@ class EDACDB(object):
                                         'name': body['volcanism_type_name']
                                         })
         body.pop('volcanism_type_name')
-        # printdebug('Compositions - Components')
-        # OK Atmosphere Compositions
-        atmoscomposition = body.pop('atmosphere_composition')
-        # List of "atmosphere_composition":
-        # [{"atmosphere_component_id":9,"share":91.2,
-        #   "atmosphere_component_name":"Nitrogen"},
-        #  {"atmosphere_component_id":10,"share":8.7,
-        # "atmosphere_component_name":"Oxygen"},
-        if len(atmoscomposition) > 0:
-            # Ensure all the components exist
-            for component in atmoscomposition:
-                component['atmosphere_component_id'] = self.cache.atmoscomponents.findoradd({
-                    'eddbid': component['atmosphere_component_id'],
-                    'name': component['atmosphere_component_name']
-                    })
-                component.pop('atmosphere_component_name')
-        #
-        solidcomposition = body.pop('solid_composition')
-        if len(solidcomposition) > 0:
-            # Ensure all the components exist
-            for component in solidcomposition:
-                component['solid_component_id'] = self.cache.solidtypes.findoradd({
-                    'eddbid': component['solid_component_id'],
-                    'name': component['solid_component_name']
-                    })
-                component.pop('solid_component_name')
-        #
-        rings = body.pop('rings')
-        '''
-        "rings":[{"id":23,"created_at":1466612897,"updated_at":1466612897,
-            "name":"D Ring","semi_major_axis":0,"ring_type_id":1,
-            "ring_mass":250560.2,"ring_inner_radius":74500,
-            "ring_outer_radius":140180,"ring_type_name":"Icy"}]
-        '''
-        if len(rings) > 0:
-            for ring in rings:
-                ring['ring_type'] = self.cache.ringtypes.findoradd({
-                    'eddbid': ring['ring_type_id'],
-                    'name': ring['ring_type_name'],
-                    })
-                ring.pop('ring_type_id')
-                ring.pop('ring_type_name')
-        #
-        materials = body.pop('materials')
-        if len(materials) > 0:
-            # Ensure all the components exist
-            for component in materials:
-                component['material_id'] = self.cache.materials.findoradd({
-                    'eddbid': component['material_id'],
-                    'name': component['material_name']
-                    })
-                component.pop('material_name')
         # Add body to DB if required:
         hashdata = ""
         for key in sorted(body.keys()):
-            hashdata += str(body[key])
+            if type(body[key]) is list:
+                for subitem in body[key]:
+                    if type(subitem) is dict:
+                        for subsubitem in sorted(subitem.keys()):
+                            hashdata += str(subitem[subsubitem])
+                    else:
+                        hashdata += str(body[key])
+            else:
+                hashdata += str(body[key])
         body['duphash'] = self.duphash(hashdata)
+        atmoscomposition = body.pop('atmosphere_composition')
+        solidcomposition = body.pop('solid_composition')
+        materials = body.pop('materials')
+        rings = body.pop('rings')
         newitemid = self.cache.bodies.findoradd(body)
+        if type(newitemid) is int:
+            return False
+        else:
+            return True
         # print('Body ID: %d' % newitemid)
+
+    def create_eddb_bodyjoins_in_db(self, ibody):
+        body = copy.copy(ibody)
         # Now we have a reference ID for the system we can update the
         # Composition tables
-        # Skip these if newitemid is None (probably a bulk operation)
+        # Skip these if newitemid is None
+        newitemid = self.cache.bodies.getpkfromeddbid(body['eddbid'])
+        #TODO rewrite to list comprehensions like systems
         if newitemid is not None:
+            atmoscomposition = body.pop('atmosphere_composition')
+            # List of "atmosphere_composition":
+            # [{"atmosphere_component_id":9,"share":91.2,
+            #   "atmosphere_component_name":"Nitrogen"},
+            #  {"atmosphere_component_id":10,"share":8.7,
+            # "atmosphere_component_name":"Oxygen"},
+            if len(atmoscomposition) > 0:
+                # Ensure all the components exist
+                for component in atmoscomposition:
+                    component['atmosphere_component_id'] = self.cache.atmoscomponents.findoradd({
+                        'eddbid': component['atmosphere_component_id'],
+                        'name': component['atmosphere_component_name']
+                        })
+                    component.pop('atmosphere_component_name')
+            #
             if len(atmoscomposition) > 0:
                 # Ensure all the components exist
                 for component in atmoscomposition:
@@ -374,6 +449,16 @@ class EDACDB(object):
                         'related_body': newitemid,
                         'share': component['share']
                     })
+            #
+            solidcomposition = body.pop('solid_composition')
+            if len(solidcomposition) > 0:
+                # Ensure all the components exist
+                for component in solidcomposition:
+                    component['solid_component_id'] = self.cache.solidtypes.findoradd({
+                        'eddbid': component['solid_component_id'],
+                        'name': component['solid_component_name']
+                        })
+                    component.pop('solid_component_name')
             #
             if len(solidcomposition) > 0:
                 # Ensure all the components exist
@@ -384,6 +469,16 @@ class EDACDB(object):
                         'share': component['share']
                     })
             #
+            materials = body.pop('materials')
+            if len(materials) > 0:
+                # Ensure all the components exist
+                for component in materials:
+                    component['material_id'] = self.cache.materials.findoradd({
+                        'eddbid': component['material_id'],
+                        'name': component['material_name']
+                        })
+                    component.pop('material_name')
+            #
             if len(materials) > 0:
                 # Ensure all the components exist
                 for component in materials:
@@ -392,6 +487,22 @@ class EDACDB(object):
                         'related_body': newitemid,
                         'share': component['share']
                     })
+            #
+            rings = body.pop('rings')
+            '''
+            "rings":[{"id":23,"created_at":1466612897,"updated_at":1466612897,
+                "name":"D Ring","semi_major_axis":0,"ring_type_id":1,
+                "ring_mass":250560.2,"ring_inner_radius":74500,
+                "ring_outer_radius":140180,"ring_type_name":"Icy"}]
+            '''
+            if len(rings) > 0:
+                for ring in rings:
+                    ring['ring_type'] = self.cache.ringtypes.findoradd({
+                        'eddbid': ring['ring_type_id'],
+                        'name': ring['ring_type_name'],
+                        })
+                    ring.pop('ring_type_id')
+                    ring.pop('ring_type_name')
             #
             if len(rings) > 0:
                 # Ensure all the components exist
@@ -412,6 +523,21 @@ class EDACDB(object):
                     ring['duphash'] = self.duphash(hashdata)
                     result = self.cache.rings.findoradd(ring)
 
+    def system_filter(self, system):
+        # Checks if we want this system
+        # We assume we don't
+        if self.filteropt.allobjects is True:
+            return False        # We want everything so get on with it
+        if self.filteropt.populated is True:
+            if system['is_populated'] is True:
+                return False
+        if self.filteropt.unpopulated is True:
+            if system['is_populated'] is True:
+                return False
+        if self.filteropt.aoi is True:
+            if self.filteropt.aoitest(system) is False:
+                return False
+        return True
 
     def create_system_in_db(self, system):
         # System is Dict
@@ -420,8 +546,12 @@ class EDACDB(object):
         # [eddbid], [is_populated], [population], [simbad_ref], [needs_permit],
         # [eddbdate], [reserve_type], [security], [state], [allegiance],
         # [faction], [power], [government], [power_state], [primary_economy]
-        #print("Creating a new system")
-        #print(system)
+        # print("Creating a new system")
+        # print(system)
+        # Do we want this system?
+        if self.system_filter(system) is True:
+            return False
+        # print('System accepted for load: %s' % system['name'].encode('utf-8'))
         # Do lookups
         # find or add will add to db if necessary and refresh
         system['security'] = self.cache.securitylevels.findoradd(system['security'])
@@ -475,7 +605,7 @@ class EDACDB(object):
         }
         self.schema = self.client.get(self.dbapi)
         self.bulkschema = self.client.get(self.bulkapi['url'])
-
+        self.filteropt = SystemFilter()
         # print(self.schema)  # Ordered Dict of objects
         print(self.bulkschema)
         self.cache = DBCache(self.client, self.schema, self.bulkapi)

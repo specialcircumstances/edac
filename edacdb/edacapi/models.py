@@ -604,9 +604,24 @@ class StationShip(models.Model):
     class Meta:
         unique_together = ('station', 'shiptype',)
 
+
 class StationModule(models.Model):
     module = models.ForeignKey(Module, models.CASCADE)
     station = models.ForeignKey(Station, models.CASCADE)
 
     class Meta:
         unique_together = ('station', 'module',)
+
+
+class MarketListing(models.Model):
+    station = models.ForeignKey(Station, models.CASCADE)
+    commodity = models.ForeignKey(Commodity, models.CASCADE)
+    supply = models.IntegerField(blank=True, null=True)
+    demand = models.IntegerField(blank=True, null=True)
+    buy_price = models.IntegerField(blank=True, null=True)
+    sell_price = models.IntegerField(blank=True, null=True)
+    eddb_updated_at = models.IntegerField(blank=True, null=True)
+    duphash = models.CharField(max_length=8, blank=True, default='')
+
+    class Meta:
+        unique_together = ('station', 'commodity',)

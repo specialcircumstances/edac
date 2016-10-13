@@ -263,6 +263,7 @@ class Systems(object):
                 #    printdebug('Reloading SystemID Cache')
                 #    self.dbapi.cache.systemids.refresh()
                 self.dbapi.endsystemidbulkmode()
+                self.dbapi.printaoistats()
                 #self.data_load_process()
                 #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
                 self.loaded = True  # TODO better checks here
@@ -289,6 +290,7 @@ class Bodies(object):
             printdebug('%s found. Starting to load EDDB Bodies data.' % filepath)
             self.timestart = time.clock()
             if True:    # Eventually this will be a try
+                self.changedbodyid = set([])
                 for x in range(0, 2):    # Two passes to enable bulk methods
                     with open(filepath, 'r', encoding='utf-8') as myfile:
                         self.dbapi.startbodybulkmode()
@@ -298,36 +300,46 @@ class Bodies(object):
                             # Tidy up fields to match DB
                             # print(item)
                             item['eddbid'] = item.pop('id')
-                            item['eddb_created_at'] = item.pop('created_at')
-                            item['eddb_updated_at'] = item.pop('updated_at')
-                            # These are Ints for me
-                            if item['catalogue_hd_id'] == '':
-                                item['catalogue_hd_id'] = None
-                            elif type(item['catalogue_hd_id']) is str:
-                                item['catalogue_hd_id'] = int(item['catalogue_hd_id'].replace(',', '').replace('.', ''))
-                            #
-                            if item['catalogue_hipp_id'] == '':
-                                item['catalogue_hipp_id'] = None
-                            elif type(item['catalogue_hipp_id']) is str:
-                                item['catalogue_hipp_id'] = int(item['catalogue_hipp_id'].replace(',', '').replace('.', ''))
-                            # str cannot be Null in DB
-                            if item['catalogue_gliese_id'] is None:
-                                item['catalogue_gliese_id'] = ''
-                            # str cannot be Null in DB
-                            if item['luminosity_sub_class'] is None:
-                                item['luminosity_sub_class'] = ''
-                            # str cannot be Null in DB
-                            if item['full_spectral_class'] is None:
-                                item['full_spectral_class'] = ''
-                            # str cannot be Null in DB
-                            if item['luminosity_class'] is None:
-                                item['luminosity_class'] = ''
-                            # str cannot be Null in DB
-                            if item['spectral_class'] is None:
-                                item['spectral_class'] = ''
-                            #
-                            if self.dbapi.create_eddb_body_in_db(item) is True:
-                                self.bodies_changed += 1
+                            if x == 0:
+                                item['eddb_created_at'] = item.pop('created_at')
+                                item['eddb_updated_at'] = item.pop('updated_at')
+                                # These are Ints for me
+                                if item['catalogue_hd_id'] == '':
+                                    item['catalogue_hd_id'] = None
+                                elif type(item['catalogue_hd_id']) is str:
+                                    item['catalogue_hd_id'] = int(item['catalogue_hd_id'].replace(',', '').replace('.', ''))
+                                #
+                                if item['catalogue_hipp_id'] == '':
+                                    item['catalogue_hipp_id'] = None
+                                elif type(item['catalogue_hipp_id']) is str:
+                                    item['catalogue_hipp_id'] = int(item['catalogue_hipp_id'].replace(',', '').replace('.', ''))
+                                # str cannot be Null in DB
+                                if item['catalogue_gliese_id'] is None:
+                                    item['catalogue_gliese_id'] = ''
+                                # str cannot be Null in DB
+                                if item['luminosity_sub_class'] is None:
+                                    item['luminosity_sub_class'] = ''
+                                # str cannot be Null in DB
+                                if item['full_spectral_class'] is None:
+                                    item['full_spectral_class'] = ''
+                                # str cannot be Null in DB
+                                if item['luminosity_class'] is None:
+                                    item['luminosity_class'] = ''
+                                # str cannot be Null in DB
+                                if item['spectral_class'] is None:
+                                    item['spectral_class'] = ''
+                                #
+                                if self.dbapi.create_eddb_body_in_db(item) is True:
+                                    self.bodies_changed += 1
+                                    self.changedbodyid.add(item['eddbid'])
+                            elif x == 1:
+                                if self.bodies_changed == 0:
+                                    continue
+                                # Second pass update changed or
+                                # added station joins
+                                if item['eddbid'] in self.changedbodyid:
+                                    if self.dbapi.create_eddb_bodyjoins_in_db(item) is True:
+                                        self.stations_changed += 1
                             if self.bodies_changed % 100 == 0:
                                 seconds = int(time.clock() - self.timestart)
                                 srate = (self.bodies_count + 1) / (seconds + 1)
@@ -427,77 +439,11 @@ class Stations(object):
         self.types = {}
         self.dbapi = dbapi
         if isfile(filepath):
-            printdebug('%s found. Starting to load EDDB stations file.'
-                       % filepath)
-            self.timestart = time.clock()
-            if True:    # Eventually this will be a try
-                for x in range(0, 2):    # Two passes to enable bulk methods
-                    with open(filepath, 'r', encoding='utf-8') as myfile:
-                        self.dbapi.startstationbulkmode()
-                        for line in myfile:
-                            item = json.loads(line)
-                            self.stations_count += 1
-                            # Tidy up fields to match DB
-                            # print(item)
-                            item['eddbid'] = item.pop('id')
-                            item['eddb_updated_at'] = item.pop('updated_at')
-                            item['eddb_shipyard_updated_at'] = item.pop('shipyard_updated_at')
-                            item['eddb_outfitting_updated_at'] = item.pop('outfitting_updated_at')
-                            item['eddb_market_updated_at'] = item.pop('market_updated_at')
-                            if item['max_landing_pad_size'] == 'None':
-                                item['max_landing_pad_size'] = '0'
-                            elif item['max_landing_pad_size'] == None:
-                                item['max_landing_pad_size'] = ''
-                            # item['eddbname'] = item.pop('name')
-                            #
-                            if self.dbapi.create_eddb_station_in_db(item) is True:
-                                self.stations_changed += 1
-                            if self.stations_count % 100 == 0:
-                                seconds = int(time.clock() - self.timestart)
-                                srate = (self.stations_count + 1) / (seconds + 1)
-                                crate = (self.stations_changed + 1) / (seconds + 1)
-                                print('Read %d stations (%d/s), changed %d(%d/s)              \r' % (
-                                        self.stations_count, srate,
-                                        self.stations_changed, crate),
-                                        end='')
-                        myfile.close
-                        #self.dbapi.create_system_bulk_flush()
-                        self.dbapi.endstationbulkmode()
-                seconds = int(time.clock() - self.timestart)
-                srate = (self.stations_count + 1) / (seconds + 1)
-                crate = (self.stations_changed + 1) / (seconds + 1)
-                printdebug('Read %d stations (%d/s), changed %d(%d/s)              \r' % (
-                        self.stations_count, srate,
-                        self.stations_changed, crate)
-                        )
-                printdebug('Successfully loaded stations JSON: %s' % filepath)
-                #self.data_load_process()
-                #printdebug('Test get ship by name: %s' % self.ships.get_by_name('keelback').properties['name'])
-                self.loaded = True  # TODO better checks here
-            #except Exception as e:
-            #    print(str(e))
-
-        else:
-            printerror('%s not found. Cannot load EDDB stations reference.' % filepath)
-
-
-class Stations(object):
-
-    def __init__(self, dbapi, filepath=stationsfile):
-        # Well, we need to open the filepath
-        if type(dbapi) is not EDACDB:
-            printerror('dbapi must be of type EDACDB()')
-            return False
-        self.stations = {}
-        self.stations_count = 0
-        self.stations_changed = 0
-        self.types = {}
-        self.dbapi = dbapi
-        if isfile(filepath):
             printdebug('%s found. Starting to load EDDB stations reference.'
                        % filepath)
             self.timestart = time.clock()
             if True:    # Eventually this will be a try
+                self.changedsysid = set([])
                 for x in range(0, 2):    # Two passes to enable bulk methods
                     with open(filepath, 'r', encoding='utf-8') as myfile:
                         self.dbapi.startstationbulkmode()
@@ -507,18 +453,30 @@ class Stations(object):
                             # Tidy up fields to match DB
                             # print(item)
                             item['eddbid'] = item.pop('id')
-                            item['eddb_updated_at'] = item.pop('updated_at')
-                            item['eddb_shipyard_updated_at'] = item.pop('shipyard_updated_at')
-                            item['eddb_outfitting_updated_at'] = item.pop('outfitting_updated_at')
-                            item['eddb_market_updated_at'] = item.pop('market_updated_at')
-                            if item['max_landing_pad_size'] == 'None':
-                                item['max_landing_pad_size'] = '0'
-                            elif item['max_landing_pad_size'] == None:
-                                item['max_landing_pad_size'] = ''
-                            # item['eddbname'] = item.pop('name')
-                            #
-                            if self.dbapi.create_eddb_station_in_db(item) is True:
-                                self.stations_changed += 1
+                            if x == 0:
+                                # First pass check for changes,
+                                # add/update stations
+                                item['eddb_updated_at'] = item.pop('updated_at')
+                                item['eddb_shipyard_updated_at'] = item.pop('shipyard_updated_at')
+                                item['eddb_outfitting_updated_at'] = item.pop('outfitting_updated_at')
+                                item['eddb_market_updated_at'] = item.pop('market_updated_at')
+                                if item['max_landing_pad_size'] == 'None':
+                                    item['max_landing_pad_size'] = '0'
+                                elif item['max_landing_pad_size'] == None:
+                                    item['max_landing_pad_size'] = ''
+                                # item['eddbname'] = item.pop('name')
+                                #
+                                if self.dbapi.create_eddb_station_in_db(item) is True:
+                                    self.stations_changed += 1
+                                    self.changedsysid.add(item['eddbid'])
+                            elif x == 1:
+                                if self.stations_changed == 0:
+                                    continue
+                                # Second pass update changed or
+                                # added station joins
+                                if item['eddbid'] in self.changedsysid:
+                                    if self.dbapi.create_eddb_stationjoins_in_db(item) is True:
+                                        self.stations_changed += 1
                             if self.stations_count % 100 == 0:
                                 seconds = int(time.clock() - self.timestart)
                                 srate = (self.stations_count + 1) / (seconds + 1)

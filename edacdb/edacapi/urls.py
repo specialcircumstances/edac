@@ -50,6 +50,7 @@ router.register(r'modulecats', views.ModuleCategoryViewSet)
 router.register(r'modulegroups', views.ModuleGroupViewSet)
 router.register(r'modguidances', views.ModuleGuidanceTypeViewSet)
 router.register(r'modmounts', views.ModuleMountTypeViewSet)
+router.register(r'marketlistings', views.MarketListingViewSet)
 
 
 bulkrouter = BulkRouter(schema_title='EDACD API Bulk Schema',
@@ -78,7 +79,8 @@ bulkrouter.register(r'stationships', views.StationShipBulkViewSet,
                     'stationships')
 bulkrouter.register(r'stationmodules', views.StationModuleBulkViewSet,
                     'stationmodules')
-
+bulkrouter.register(r'marketlistings', views.MarketListingBulkViewSet,
+                    'marketlistings')
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.
@@ -97,6 +99,7 @@ urlpatterns = [
     url(r'^bulk/cbor/stationimports/', views.CBORStationImportView.as_view()),
     url(r'^bulk/cbor/stationexports/', views.CBORStationExportView.as_view()),
     url(r'^bulk/cbor/stationprohibited/', views.CBORStationProhibitedView.as_view()),
+    url(r'^bulk/cbor/bodies/', views.CBORBodyView.as_view()),
     url(r'^bulk/cbor/rings/', views.CBORRingView.as_view()),
     url(r'^bulk/cbor/commodities/', views.CBORCommodityView.as_view()),
     url(r'^bulk/cbor/modules/', views.CBORModuleView.as_view()),
@@ -104,8 +107,9 @@ urlpatterns = [
     url(r'^bulk/cbor/modulegroups/', views.CBORModuleGroupView.as_view()),
     url(r'^bulk/cbor/shiptypes/', views.CBORShipTypeView.as_view()),
     url(r'^bulk/cbor/stations/', views.CBORStationView.as_view()),
+    url(r'^bulk/cbor/marketlistings/', views.CBORMarketListingView.as_view()),
     url(r'^bulk/bcreatesystems/', views.SystemBulkCreateViewSet.as_view()),
     url(r'^bulk/bupdatesystems/', views.SystemBulkUpdateViewSet.as_view()),
-    url(r'^bulk/bstationmodules/', views.SuperStationModuleBulkViewSet.as_view()),    # no idea why needed for this one!
+    url(r'^bulk/bstationmodules/', views.SuperStationModuleBulkViewSet.as_view()),
     url(r'^api-auth/', include('rest_framework.urls', namespace='rest_framework'))
 ]

@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 '''
-This is a wrapper around coreapi to make talking to our DB easier
+This was a wrapper around coreapi to make talking to our DB easier
+It's now using slumber instead, and slumber has been extended to support cbor
 
 Our DB is a django based solution, exposing a REST API
 
 At the moment django is using it's default sqllite DB, but there's nothing
-to stop it using something else, like MySQL if you prefer.
+to stop it using something else, like MySQL if you prefer (not tested).
 
 '''
 
@@ -170,8 +171,11 @@ class CompositionBulkUpdateProcess(Process):
                 printerror(exc)
                 exctype, value = sys.exc_info()[:2]
                 print("Unexpected error: %s :: %s" % (exctype, value))
+                # TODO I need to manage IntegrityErrors from the DB here
+                # Perhaps blank the related duphash for joins???
+
                 # printerror(content)
-                # raise
+                raise
             finally:
                 self.task_queue.task_done()
                 # Yes, even if the data is lost... just rerun...
@@ -368,8 +372,14 @@ class FactionCache(object):
 
 
 class BodyCache(object):
-
     # This could probably be refactored alongside Composition Cache
+
+    def getpkfromeddbid(self, eddbid):
+        if eddbid in self.eddb:
+            return self.eddb[eddbid]
+        else:
+            return None
+
     def addtobulkupdate(self, origcomposition, mode):
         composition = copy.deepcopy(origcomposition)
         if mode not in self.bulklist:
@@ -564,7 +574,7 @@ class CBORJoinCache(object):
             if 'delete' in self.bulklist:
                 if len(self.bulklist['delete']) > 0:
                     mydictd = {}
-                    mydictd['content'] = self.bulklist['delete']
+                    mydictd['content'] = copy.copy(self.bulklist['delete'])
                     mydictd['jobtype'] = self.mylist
                     mydictd['jobmode'] = 'delete'
                     self.bulkqueue.put(mydictd)
@@ -573,13 +583,13 @@ class CBORJoinCache(object):
             # This hands in bulk to other process via queue
             # wrap up in dict to indicate target in API
             mydict = {}
-            mydict['content'] = self.bulklist[mode]
+            mydict['content'] = copy.copy(self.bulklist[mode])
             mydict['jobtype'] = self.mylist
             mydict['jobmode'] = mode
             self.bulkqueue.put(mydict)
             self.bulklist[mode] = []
             self.bulkcount[mode] = 0
-            while self.bulkqueue.qsize() > self.bulkprocesses:
+            while self.bulkqueue.qsize() > (self.bulkprocesses * 2):
                 # no point letting the queue get too big
                 # This blocks
                 time.sleep(0.1)
@@ -587,6 +597,7 @@ class CBORJoinCache(object):
 
     def clearcache(self):
         self.items = {}
+        self.cacheloaded = False
 
     def precreate(self, mylist):
         return
@@ -601,9 +612,13 @@ class CBORJoinCache(object):
         # Returns a dictionary. Called by a partial refresh
         # self.partialfield and self.partiallist should probably be
         # set explicitly.
+        if self.partialfielddb is not None:
+            mypartialfield = self.partialfielddb
+        else:
+            mypartialfield = self.partialfield
         mydict = {
-            'lookupkey': self.partialfield,
-            'valuelist': self.partiallist,
+            'lookupkey': mypartialfield,
+            'valuelist': list(set(self.partiallist)),
         }
         printdebug('There are %d items in %s partial list. Lookup is: %s'
               % (len(self.partiallist), self.mylist, self.partialfield))
@@ -618,22 +633,30 @@ class CBORJoinCache(object):
         response = getattr(slumapi.cbor, self.mylist).get(
                             offset=0, limit=1)
         count = response['count']       # Total number of records
+        printdebug('CBORJoinCache:refresh:dbcount:%d' % count)
         totalcount = 0
         limit = 500000                  # These are small records, get lots
         offset = 0                      # Start here
+        rdict = self.getitemstorefresh()   # Need to do this always to populate
+                                           # dependants if necessary, but only
+                                           # used in partial refreshes
         if partial is True:
-            printdebug('Fetching packed CBOR partial dump of %s' % self.mylist)
-            rdict = self.getitemstorefresh()
+            printdebug('CBORJoinCache:%s:refresh: Fetching packed CBOR partial dump.' % self.mylist)
             myfield = rdict['lookupkey']
             myvalues = rdict['valuelist']
             partialcount = len(myvalues)
+            printdebug('CBORJoinCache:%s:refresh: List is %d items.' % (self.mylist, partialcount))
+            if partialcount == 0:
+                return      # Nothing to get, nothing to do.
+            if partialcount == 1:
+                print(myvalues)
             partialoffset = 0
-            partiallimit = 1000     # Step through in chunks
+            partiallimit = 800     # Step through in chunks
         else:
-            printdebug('Fetching packed CBOR dump of %s' % self.mylist)
+            printdebug('CBORJoinCache:%s:refresh: Fetching packed CBOR full dump.' % self.mylist)
             partialcount = 1
             partialoffset = 0
-            self.clearcache()
+            self.clearcache()               # Clear existing cache entries
         while (offset < count) and (partialoffset < partialcount):
             printdebug('Please wait. Loading. Loaded %d of %d....' % (
                     offset, count), inplace=True)
@@ -651,14 +674,15 @@ class CBORJoinCache(object):
                                 offset=offset, limit=limit)
             packedlist = response['results']
             # Reconstruct the data
+            # [4, 'pk', 'edsmid', 'eddbid', 'duphash',
+            # (9397648, 60, 17, 'sENZY4K/'), ..etc..
             mylist = []
             if len(packedlist) > 0:
-                cols = packedlist[0]
-                heads = packedlist[1:cols+1]
-                mylist = [
-                            {heads[il]:ol[il] for il in range(0, cols)}
-                            for ol in packedlist[cols+1:]
-                            ]
+                cols = packedlist.pop(0)
+                heads = [packedlist.pop(0) for i in range(0, cols)]
+                mylist = [{heads[il]:ol[il]
+                           for il in range(0, cols)}
+                          for ol in packedlist]
                 # Done - now I have a list of dicts
             del packedlist      # free up the memory
             idsprocessed = 0
@@ -681,6 +705,8 @@ class CBORJoinCache(object):
                     offset = 0
             else:
                 offset += limit
+        self.cacheloaded = True
+        self.partiallist = []   # Reset any partiallist
         printdebug('Load complete. Loaded %d records.                ' % totalcount)
 
     def startbulkmode(self):
@@ -701,7 +727,7 @@ class CBORJoinCache(object):
                 self.bulkprocess[myid].start()
             self.bulkmode = True
         else:
-            printerror('Composition Cache %s Bulkmode already enabled'
+            printerror('CBOR Join Cache %s Bulkmode already enabled'
                        % self.mylist)
 
     def endbulkmode(self):
@@ -726,11 +752,40 @@ class CBORJoinCache(object):
                 self.bulkprocess[myid].join()
             printdebug('Flushed Cache %s Bulk Update Process.' % self.mylist)
             self.bulkmode = False
+            # Now for the reloading...
+            # Resolve any forign keyed partiallist requests into our partiallist
+            # e.g.
+            # fpart = {
+            #     'list': copy.deepcopy(self.partiallist),
+            #     'lfunc': self.getpkfromeddbid,
+            # }
+            for item in self.foreignpartials:
+                if len(item.get('list', '')) > 0:
+                    printdebug('CBORJoinCache:%s:endbulkmode:Getting foreign partials.' % self.mylist)
+                    printdebug('CBORJoinCache:%s:endbulkmode:List is %d long.' % (self.mylist, len(item.get('list'))))
+                    clist = [item.get('lfunc')(term)
+                             for term in item.get('list', [])]
+                    printdebug('CBORJoinCache:%s:endbulkmode:Looked up %d entries.' % (self.mylist, len(clist)))
+                    # Remove duplicates and Nones
+                    clist = list(set([item for item in clist if item is not None]))
+                    printdebug('CBORJoinCache:%s:endbulkmode:Filtered to %d entries.' % (self.mylist, len(clist)))
+                    # partiallist should be IDs now, as we've looked them up
+                    self.partiallist.extend(clist)
+                else:
+                    printdebug('CBORJoinCache:%s:endbulkmode:foreignpartials is empty.' % self.mylist)
+            self.foreignpartials = []
+            # Check if we should run in partial fetch mode
             if self.partialfield is not None:
                 mylen = len(self.partiallist)
-                if (mylen < self.bulklimit) and ((mylen * 2) < self.getcount()):
+                printdebug('CBORJoinCache:%s:endbulkmode:partiallist is %d entries.' % (self.mylist, mylen))
+                if (mylen * 2) < self.bulklimit:
+                    printdebug('CBORJoinCache:%s:endbulkmode:Going for a partial refresh.' % self.mylist)
                     self.refresh(partial=True)
+                else:
+                    printdebug('CBORJoinCache:%s:endbulkmode:Going for a full refresh (too many).' % self.mylist)
+                    self.refresh()
             else:
+                printdebug('CBORJoinCache:%s:endbulkmode:Going for a full refresh (partial not requested).' % self.mylist)
                 self.refresh()
         else:
             printerror('Composition Cache %s Bulkmode not running.'
@@ -753,10 +808,14 @@ class CBORJoinCache(object):
         self.bulkapi = bulkapi
         self.bulkmode = False
         self.bulklimit = 32000
-        self.partialfield = None
+        self.partialfield = None        # Used to add to partiallists
+        self.partialfielddb = None      # If exists override for DB search
         self.partiallist = []
+        self.foreignpartials = []
+        self.dependants = []
+        self.clearcache()   # Without refresh this is required
         self.initadd()
-        self.refresh()
+        #self.refresh()     # Defer full loading by default
 
 
 class CompositionCache(CBORJoinCache):
@@ -838,11 +897,32 @@ class CompositionCache(CBORJoinCache):
         comp = odict['component']
         share = odict['share']
         pk = odict['id']
-        if body not in self.items:
-            self.items[body] = {}
-        elif type(self.items[body]) is not dict:
-            self.items[body] = {}
-        self.items[body][comp] = {'share': share, 'id': pk}
+        if ('id' in odict) and ('related_body' in odict):
+            if body not in self.items:
+                self.items[body] = {}
+            elif type(self.items[body]) is not dict:
+                self.items[body] = {}
+            self.items[body][comp] = {'share': share, 'id': pk}
+        elif 'related_body_id' in odict:
+            # Assume a bulk insert, so no ID, but we can track
+            # possible duplicate here
+            body = odict['related_body_id']      # Note prepend of _id
+            dbfield = self.lookupf + '_id'
+            thing = odict[dbfield]
+            if ostation not in self.items:
+                self.items[body] = {}
+            elif type(self.items[body]) is not dict:
+                self.items[body] = {}
+            if thing not in self.items[body]:
+                self.items[body][thing] = None      # i.e. unknown
+
+    def initadd(self):
+        # Can add init commands here.
+        self.bulkprocesses = 1
+        self.partialfield = 'body'
+        self.partialfielddb = 'related_body_id'
+        self.lookupf = 'component'
+        self.refresh()
 
 
 class StationJoinCache(CBORJoinCache):
@@ -885,9 +965,9 @@ class StationJoinCache(CBORJoinCache):
                 if newset == existingset:
                     return False    # Yes I found it, and no update required
                 else:
-                    printdebug('Need to update because these do not match')
-                    printdebug("existing set: %s" % existingset)
-                    printdebug("new set: %s" % newset)
+                    # printdebug('Need to update because these do not match')
+                    # printdebug("existing set: %s" % existingset)
+                    # printdebug("new set: %s" % newset)
                     # We have no "update" action, we always delete
                     # and replace. Need a list of PKs to delete
                     pklist = [v for k, v in self.items[station].items()
@@ -934,10 +1014,6 @@ class StationJoinCache(CBORJoinCache):
                     printerror(myparams)
                     return None
         return True
-
-    def clearcache(self):
-        # We override to set lookupf based on self.mylist
-        self.items = {}
 
     def precreate(self, mylist):
         keyset = set([item['station'] for item in mylist
@@ -986,8 +1062,10 @@ class StationJoinCache(CBORJoinCache):
     def initadd(self):
         # Can add init commands here.
         # Run just before refresh
+        self.bulkprocesses = 1      # Ensures DELETES are sent before POSTS
         # Setting a partial field will enable partial refresh after bulk
         self.partialfield = 'station'
+        self.partialfielddb = 'station_id'
         # Setup lookupf based on listid
         if self.mylist == 'stationeconomies':
             self.lookupf = 'economy'
@@ -1069,14 +1147,16 @@ class HashedItemCache(CBORJoinCache):
                                % self.mylist)
                     printerror(str(e))
                     printerror(myitem)
-                return dbid
+                # return dbid
+                return None
             else:
-                return dbid
+                return dbid         # No change
 
     def clearcache(self):
         self.eddb = {}      # eddbid
         self.eddbname = {}
         self.duphash = {}
+        self.cacheloaded = False
 
     def precreate(self, mylist):
         # None for this at the moment
@@ -1104,10 +1184,42 @@ class HashedItemCache(CBORJoinCache):
     def getcount(self):
         return len(self.duphash)
 
+    def getitemstorefresh(self):
+        # Returns a dictionary. Called by a partial refresh
+        # self.partialfield and self.partiallist should probably be
+        # set explicitly.
+        # OVERRIDE HERE TO add stations to join tables partial lists
+        mydict = {
+            'lookupkey': self.partialfield,
+            'valuelist': self.partiallist,
+        }
+        printdebug('There are %d items in %s partial list. Lookup is: %s'
+              % (len(self.partiallist), self.mylist, self.partialfield))
+        # OVERRIDE HERE TO add stations to join tables partial lists
+        # So, if station is partial reloaded, stationmodules is partially
+        # reloaded with relevant info. Ideally, move towards not Loading
+        # all the join tables everytime we update a few systems
+        # We've already checked to ensure it's not better just to fully Load
+        if self.mylist in ['stations', 'bodies']:
+            printdebug('HashedItemCache:%s:gitr: Checking for dependants' % self.mylist)
+            for myobj in self.dependants:
+                # Reference to dict and list of keys passed
+                # Will be looked up at the time to get new IDs
+                fpart = {
+                    'list': copy.copy(self.partiallist),
+                    'lfunc': self.getpkfromeddbid,
+                }
+                myobj.foreignpartials.append(fpart)
+                printdebug('HashedItemCache:%s:gitr: Added %d items.' % (self.mylist, len(fpart['list'])))
+        return mydict
+
     def initadd(self):
         # Stub, can add init commands here.
         # Run just before refresh
+        self.partialfield = 'eddbid'
         self.bulklimit = 8000
+        self.dependants = []
+        self.refresh()
 
 
 class SysIDCache2(HashedItemCache):
@@ -1116,6 +1228,7 @@ class SysIDCache2(HashedItemCache):
         self.eddb = {}      # eddbid
         self.edsm = {}
         self.duphash = {}
+        self.cacheloaded = False
 
     def updateoradd(self, system):
         # system in good state
@@ -1148,7 +1261,11 @@ class SysIDCache2(HashedItemCache):
         self.eddb.update(dict.fromkeys(eddbset))  # Find by eddb
         edsmset = set([item['edsmid'] for item in mylist])
         self.edsm.update(dict.fromkeys(edsmset))  # Find by edsm
-        duphashset = set([item['pk'] for item in mylist])
+        # Temp - workaround
+        if 'pk' in mylist[0]:
+            duphashset = set([item['pk'] for item in mylist])
+        else:
+            duphashset = set([item['id'] for item in mylist])
         self.duphash.update(dict.fromkeys(duphashset))   # Check if update required
 
     def cacheloaditem(self, odict):
@@ -1177,6 +1294,218 @@ class SysIDCache2(HashedItemCache):
         # Setting a partial field will enable partial refresh after bulk
         self.partialfield = 'eddbid'
         self.bulklimit = 8000
+        self.refresh()
+
+
+class MarketListingCache(CBORJoinCache):
+
+    def duphash(self, data):
+        # our own duphash version
+        # data is a list of dicts
+        hashdata = ''
+        for item in data:
+            for mykey in item:
+                hashdata += str(item[mykey])
+        hashdata = str(hashdata).encode('utf-8')
+        # print(data)
+        dig = hashlib.md5(hashdata).digest()  # b']A@*\xbcK*v\xb9q\x9d\x91\x...
+        b64 = base64.b64encode(dig)       # b'XUFAKrxLKna5cZ2REBfFkg=='
+        return b64.decode()[0:8]
+
+    def checkhash(self, newdata):
+        # newdata is a list of dicts
+        # All dicts must be for the same station (ASSUME)
+        # we use the first to guide our check
+        newstation = newdata[0]['station']
+        referencehash = self.duphashdict[newstation]
+        newhash = self.duphash(newdata)
+        if newhash == referencehash:
+            return True
+        else:
+            # Add the new duphash to the data
+            for item in newdata:
+                item['dupash'] = newhash
+            # And return a false because it doesn't match
+            return False
+
+    def isstationincache(self, stationid):
+        if stationid in self.duphashdict:
+            return True
+        else:
+            return False
+
+    def findoradd(self, inlist):
+        # Need to override this
+        # We expect a list of dicts.
+        # The station ID and duphash should be same in each dict
+        # We DON'T CHECK!
+        # Now, first check if the station is in our cache.
+        # If it's not, we must assume it doesn't exist in the DB
+        pklist = []
+        station = inlist[0]['station']
+        if isstationincache(station) is True:
+            if checkhash(inlist) is True:
+                # No update required because hash matches
+                return False
+            else:
+                # Update, which means delete and create all for that station
+                # Grab all the IDs
+                pklist = [v['id'] for k, v in self.items[station].items()
+                          if v is not None]
+                # Don't forget to remove the entries in the cache now!
+                self.items[station] = {}
+        # If necessary delete anything in the PK list
+        for pk in pklist:
+            if self.bulkmode is True:
+                mydelparams = pk
+                self.addtobulkupdate(mydelparams, 'delete')
+            else:
+                try:
+                    self.client.action(
+                                    self.schema,
+                                    [self.mylist, 'destroy'],
+                                    params={'pk': pk})
+                except Exception as e:
+                    printerror('Exception in %s MarketListing FoA'
+                               % self.mylist)
+                    printerror(str(e))
+                    printerror(myparams)
+                    return None
+        for commodity in inlist:
+            # sensiblise the data
+            myparams = {
+                'station_id': station,   # Force here because of earlier assume
+                'commodity_id': commodity['commodity'],
+                'supply': commodity['supply'],
+                'demand': commodity['demand'],
+                'buy_price': commodity['buy_price'],
+                'sell_price': commodity['sell_price'],
+                'eddb_updated_at': commodity['eddb_updated_at'],
+                'duphash': commodity['duphash'],
+            }
+            if self.bulkmode is True:
+                self.addtobulkupdate(myparams, 'create')
+                self.cacheloaditem(myparams)
+            else:
+                try:
+                    odict = self.client.action(
+                                    self.schema,
+                                    [self.mylist, 'create'],
+                                    params=myparams)
+                    self.cacheloaditem(odict)
+                except Exception as e:
+                    printerror('Exception in %s MarketListing FoA'
+                               % self.mylist)
+                    printerror(str(e))
+                    printerror(myparams)
+                    return None
+        return True
+
+    def clearcache(self):
+        self.items = {}         # As pre CBORJoinCache station/commodity/detail
+        self.duphashdict = {}       # Hash for all commodities at station ?
+
+    def precreate(self, mylist):    # As per station join
+        keyset = set([item['station'] for item in mylist
+                     if item['station'] not in self.items])
+        self.items.update(dict.fromkeys(keyset))
+        self.duphashdict.update(dict.fromkeys(keyset))
+
+    def cacheloaditem(self, odict):
+        # we must have a pk/id and a station
+        # these items use id
+        if ('id' in odict) and ('station' in odict):
+            ostation = odict['station']
+            thing = odict[self.lookupf]
+            if ostation not in self.items:
+                self.items[ostation] = {}
+            elif type(self.items[ostation]) is not dict:
+                self.items[ostation] = {}
+            if self.items[ostation].get(thing) is None:
+                # Doesn't exist OR
+                # Exists but is not known (could be bulk insert related)
+                self.items[ostation][thing] = odict
+                # This probably doesn't need updated everytime, but whatever
+                self.duphashdict[ostation] = odict['duphash']
+            elif self.items[ostation][thing] == odict:
+                # we can ignore this, it means no change
+                #printerror('Ignoring Clone in DB in StationJoinCache %s, station %s, item %s'
+                #            % (self.mylist, ostation, thing))
+                pass
+            else:
+                printerror('Duplicate in DB in StationJoinCache %s, station %s, item %s'
+                            % (self.mylist, ostation, thing))
+        elif 'station_id' in odict:
+            # Assume a bulk insert, so no ID, but we can track
+            # possible duplicate here
+            ostation = odict['station_id']      # Note prepend of _id
+            dbfield = self.lookupf + '_id'
+            thing = odict[dbfield]
+            if ostation not in self.items:
+                self.items[ostation] = {}
+            elif type(self.items[ostation]) is not dict:
+                self.items[ostation] = {}
+            if thing not in self.items[ostation]:
+                self.items[ostation][thing] = None      # i.e. unknown
+        else:
+            printerror('MarketListCache:%s:cacheloaditem: ID and station required.'
+                       % self.mylist)
+
+    def refreshhashes(self):
+        # This just loads the duphash values from the DB
+        # TODO create django view that provides a CBOR packed list of duphash
+        # one per station.
+        bulkapi = self.bulkapi
+        slumapi = slumber.API(bulkapi['url'],
+                              format='cbor',
+                              auth=(bulkapi['username'],
+                              bulkapi['password']))
+        response = getattr(slumapi.cbor, self.mylist).get(
+                            offset=0, limit=1)
+        count = response['count']       # Total number of records
+        printdebug('MarketlistCache:refreshhashes:dbcount:%d' % count)
+        totalcount = 0
+        limit = 500000                  # These are small records, get lots
+        offset = 0                      # Start here
+        # rdict = self.getitemstorefresh()   # Need to do this always to populate
+                                           # dependants if necessary, but only
+                                           # used in partial refreshes
+        # mydict = {}
+        while (offset < count):
+            printdebug('Please wait. Loading. Loaded %d of %d....' % (
+                    offset, count), inplace=True)
+            response = getattr(slumapi.cbor, self.mylist).get(
+                                offset=offset, limit=limit)
+            packedlist = response['results']
+            # Reconstruct the data
+            # [4, 'pk', 'edsmid', 'eddbid', 'duphash',
+            # (9397648, 60, 17, 'sENZY4K/'), ..etc..
+            mylist = []
+            if len(packedlist) > 0:
+                cols = packedlist.pop(0)
+                heads = [packedlist.pop(0) for i in range(0, cols)]
+                mylist = [{heads[il]:ol[il]
+                           for il in range(0, cols)}
+                          for ol in packedlist]
+                # Done - now I have a list of dicts
+            del packedlist      # free up the memory
+            # Populate dict
+            if len(mylist) > 0:
+                totalcount += len(mylist)
+                self.precreate(mylist)
+                for odict in mylist:
+                    self.duphashdict[odict['station']] = odict['id']
+            offset += limit
+
+    def initadd(self):
+        # Can add init commands here.
+        # Run just before refresh
+        self.bulkprocesses = 1      # Ensures DELETES are sent before POSTS
+        # Setting a partial field will enable partial refresh after bulk
+        self.partialfield = 'station'
+        self.partialfielddb = 'station_id'
+        self.lookupf = 'commodity'
+        self.refreshhashes()
 
 
 class ItemCache(object):
@@ -1321,6 +1650,7 @@ class KitItemCache(CBORJoinCache):
         self.edids = {}
         self.names = {}
         self.eddbnames = {}
+        self.cacheloaded = False
 
     def cacheloaditem(self, odict):
         # we must have a pk/id
@@ -1432,6 +1762,11 @@ class KitItemCache(CBORJoinCache):
                 print(myparams)
             return lookupdict[item]['id']
 
+    def initadd(self):
+        # Run just before refresh
+        # Setting a partial field will enable partial refresh after bulk
+        self.refresh()
+
 
 class DBCache(object):
     # improve system import time
@@ -1456,13 +1791,18 @@ class DBCache(object):
         self.volcanismtypes = ItemCache(client, schema, 'volcanismtypes')
         self.ringtypes = ItemCache(client, schema, 'ringtypes')
         self.rings = HashedItemCache(client, schema, bulkapi, 'rings')
-        self.bodies = BodyCache(client, schema, bulkapi, 'bodies')
+        #self.bodies = BodyCache(client, schema, bulkapi, 'bodies')
+        self.bodies = SysIDCache2(client, schema, bulkapi, 'bodies')
         self.solidtypes = ItemCache(client, schema, 'solidtypes')
         self.materials = ItemCache(client, schema, 'materials')
         # Composition Caches
         self.atmoscomposition = CompositionCache(client, schema, bulkapi, 'atmoscomposition')
         self.solidcomposition = CompositionCache(client, schema, bulkapi, 'solidcomposition')
         self.materialcomposition = CompositionCache(client, schema, bulkapi, 'materialcomposition')
+        # Tell bodies which lists to trigger partial updates with
+        bodydependants = [self.atmoscomposition, self.solidcomposition,
+                          self.materialcomposition]
+        self.bodies.dependants = bodydependants
         # Station related
         self.commoditycats = ItemCache(client, schema, 'commoditycats')
         self.commodities = HashedItemCache(client, schema, bulkapi, 'commodities')
@@ -1474,6 +1814,13 @@ class DBCache(object):
         self.stationeconomies = StationJoinCache(client, schema, bulkapi, 'stationeconomies')
         self.stationships = StationJoinCache(client, schema, bulkapi, 'stationships')
         self.stationmodules = StationJoinCache(client, schema, bulkapi, 'stationmodules')
+        # Tell stations which lists to trigger partial updates with
+        stationdependants = [self.stationimports, self.stationexports,
+                             self.stationprohibited, self.stationeconomies,
+                             self.stationships, self.stationmodules
+                            ]
+        self.stations.dependants = stationdependants
+
         # Ships and Modules
         self.shiptypes = KitItemCache(client, schema, bulkapi, 'shiptypes')
         self.modules = KitItemCache(client, schema, bulkapi, 'modules')
@@ -1481,3 +1828,5 @@ class DBCache(object):
         self.modulegroups = KitItemCache(client, schema, bulkapi, 'modulegroups')
         self.modguidances = ItemCache(client, schema, 'modguidances')
         self.modmounts = ItemCache(client, schema, 'modmounts')
+        # Market data
+        self.marketlistings = MarketListingCache(client, schema, bulkapi, 'marketlistings')

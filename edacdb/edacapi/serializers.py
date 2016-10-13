@@ -11,6 +11,7 @@ from .models import StationShip, StationModule, ShipType, Module
 from .models import ModuleMountType, ModuleGuidanceType
 from .models import ModuleCategory, ModuleGroup, StationShip, StationModule
 from .models import StationImport, StationExport, StationProhibited
+from .models import MarketListing
 from rest_framework import serializers
 from rest_framework_bulk import BulkSerializerMixin, BulkListSerializer
 
@@ -409,4 +410,16 @@ class StationModuleBulkSerializer(BulkSerializerMixin,
                          serializers.ModelSerializer):
     class Meta:
         model = StationModule
+        list_serializer_class = BulkListSerializer
+
+
+class MarketListingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketListing
+
+
+class MarketListingBulkSerializer(BulkSerializerMixin,
+                         serializers.ModelSerializer):
+    class Meta:
+        model = MarketListing
         list_serializer_class = BulkListSerializer

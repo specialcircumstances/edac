@@ -25,7 +25,7 @@ from .models import StationType, Station, StationEconomy
 from .models import StationShip, StationModule, ShipType, Module
 from .models import ModuleMountType, ModuleGuidanceType, ModuleCategory
 from .models import ModuleGroup, StationShip, StationModule, StationImport
-from .models import StationExport, StationProhibited
+from .models import StationExport, StationProhibited, MarketListing
 from rest_framework import viewsets, views
 from rest_framework import status
 from rest_framework_bulk import BulkModelViewSet
@@ -65,7 +65,8 @@ from .serializers import ModuleGroupSerializer, StationShipBulkSerializer
 from .serializers import StationImportSerializer, StationExportSerializer
 from .serializers import StationProhibitedSerializer, StationModuleBulkSerializer
 from .serializers import StationImportBulkSerializer, StationExportBulkSerializer
-from .serializers import StationProhibitedBulkSerializer
+from .serializers import StationProhibitedBulkSerializer, MarketListingSerializer
+from .serializers import MarketListingBulkSerializer
 
 
 
@@ -82,6 +83,37 @@ class UpdatingBulkViewSet(BulkModelViewSet):
         bulk = isinstance(request.data, list)
         if not bulk:
             return super(BulkCreateModelMixin, self).create(request, *args, **kwargs)
+        elif len(request.data) == 0:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        elif 'station_id' in request.data[0]:   # Speed up
+            table = self.queryset.model
+            tablename = table._meta.db_table
+            fields = list(request.data[0])      # Python 3 list of keys
+            try:
+                # Try raw TODO insert correct table and fields
+                #print('Attempting direct inserts.')
+                cursor = connection.cursor()
+                queryp1 = ('INSERT INTO %s (%s, %s) VALUES'
+                            % (tablename, fields[0], fields[1]))
+                queryp2 = ''' (%s,%s) '''
+                query = queryp1 + queryp2
+                querylist = [(thisdict[fields[0]], thisdict[fields[1]]) for
+                            thisdict in request.data
+                            ]
+                with transaction.atomic():
+                    cursor.executemany(query, querylist)
+                connection.commit()             # Not sure if this is required.
+            except OperationalError:
+                # Try again
+                print('Operational Error: DB Locked?, retrying')
+                time.sleep(2)
+                with transaction.atomic():
+                    cursor.executemany(query, querylist)
+                connection.commit()
+            except Exception as exc:
+                print(exc)
+                return Response(str(exc), status=status.HTTP_400_BAD_REQUEST)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         else:
             serializer = self.get_serializer(data=request.data, many=True)
             serializer.is_valid(raise_exception=True)
@@ -96,49 +128,76 @@ class UpdatingBulkViewSet(BulkModelViewSet):
                     time.sleep(0.5)
                     retrycount -= 1
                 except Exception as exc:
+                    raise
                     print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
                     return HttpResponse(exc, status=400)
             return Response(len(serializer.data), status=status.HTTP_201_CREATED)
 
     def bulk_update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
-        # restrict the update to the filtered queryset
-        serializer = self.get_serializer(
-            self.filter_queryset(self.get_queryset()),
-            data=request.data,
-            many=True,
-            partial=partial,
-        )
-        validated_data = []
-        validation_errors = []
-        results = []
-        for item in request.data:
-            item_serializer = self.get_serializer(
-                get_object_or_404(self.filter_queryset(self.get_queryset()),
-                                  pk=item['id']),
-                data=item,
+        if len(request.data) == 0:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        elif 'station_id' in request.data[0]:
+            try:
+                for thisdict in request.data:
+                    thisdict['id'] = thisdict.pop('pk')     # Why why why ?????
+                    #thisdict['module'] = Module.objects.get(pk=thisdict['module'])
+                    #thisdict['station'] = Station.objects.get(pk=thisdict['station'])
+            except Exception as exc:
+                print(exc)
+                return Response(exc, status=status.HTTP_400_BAD_REQUEST)
+            retrycount = 20
+            for thisitem in request.data:
+                while retrycount > 0:
+                    try:
+                        StationModule.objects.filter(id=thisitem['id']).update(**thisitem)
+                        break
+                    except OperationalError:
+                        # Try again
+                        print('Operational Error: DB Locked?, retrying')
+                        time.sleep(0.5)
+                        retrycount -= 1
+                    except Exception as exc:
+                        print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
+                        return HttpResponse(str(exc), status=400)
+        else:
+            # restrict the update to the filtered queryset
+            serializer = self.get_serializer(
+                self.filter_queryset(self.get_queryset()),
+                data=request.data,
+                many=True,
                 partial=partial,
             )
-            if not item_serializer.is_valid():
-                validation_errors.append(item_serializer.errors)
-            retrycount = 20
-            result = None
-            while retrycount > 0:
-                try:
-                    result = self.get_queryset().filter(id=item['id']).update(
-                                    **item_serializer.validated_data)
-                    break
-                except OperationalError:
-                    # Try again
-                    print('Operational Error: DB Locked? Retrying...')
-                    time.sleep(0.5)
-                    retrycount -= 1
-                except Exception as exc:
-                    print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
-                    return HttpResponse(exc, status=400)
-            # results.append(result)
-        if validation_errors:
-            raise ValidationError(validation_errors)
+            validated_data = []
+            validation_errors = []
+            results = []
+            for item in request.data:
+                item_serializer = self.get_serializer(
+                    get_object_or_404(self.filter_queryset(self.get_queryset()),
+                                      pk=item['id']),
+                    data=item,
+                    partial=partial,
+                )
+                if not item_serializer.is_valid():
+                    validation_errors.append(item_serializer.errors)
+                retrycount = 20
+                result = None
+                while retrycount > 0:
+                    try:
+                        result = self.get_queryset().filter(id=item['id']).update(
+                                        **item_serializer.validated_data)
+                        break
+                    except OperationalError:
+                        # Try again
+                        print('Operational Error: DB Locked? Retrying...')
+                        time.sleep(0.5)
+                        retrycount -= 1
+                    except Exception as exc:
+                        print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
+                        return HttpResponse(exc, status=400)
+                # results.append(result)
+            if validation_errors:
+                raise ValidationError(validation_errors)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def allow_bulk_destroy(self, qs, filtered):
@@ -158,9 +217,9 @@ class UpdatingBulkViewSet(BulkModelViewSet):
         #    return Response(status=status.HTTP_400_BAD_REQUEST)
         pklist = request.data
         pklistlen = len(pklist)
-        if pklistlen == 0:
-            return Response(status=status.HTTP_400_BAD_REQUEST)
         print('bulk_destroy got %d items to destroy' % len(pklist))
+        #if pklistlen == 0:
+        #    return Response(status=status.HTTP_400_BAD_REQUEST)
         # Need to limit the number of objects we try and destroy
         # at once.
         for pk in pklist:
@@ -190,35 +249,40 @@ class CBORPackedItemView(views.APIView):
                         or f.one_to_one
                         or (f.many_to_one and f.related_model)
                         )]
-            # print(fields)
         # Check for filtering
         filterfield = request.GET.get('field')
-        filtervalues = request.GET.get('v')
+        filtervalues = request.GET.getlist('v')
         myobjects = table.objects
         if (filterfield and filtervalues) is not None:
-            filtervalues = filtervalues.split(',')
+            # print('Making a filter...')
             myfilterqs = Q()
             for value in filtervalues:
                  myfilterqs = myfilterqs | Q(**{filterfield:value})
             myobjects = myobjects.filter(myfilterqs)
         count = myobjects.count()
-        # print(count)
+        # print('I\'m counting %d objects' % count)
         offset = int(request.GET.get('offset', 0))
         limit = int(request.GET.get('limit', 9999)) + offset
-        items = myobjects.values(*fields)[offset:limit]
-        # optimise by changing to a long list.
+        # items = myobjects.values(*fields)[offset:limit]
+        items = myobjects.values_list(*fields)[offset:limit]
+        # optimise by changing to a long list with headers and tuples
         list_items = []
         noofitems = len(items)
         if noofitems > 0:
-                list_headers = [header for header in sorted(items[0].keys())]
-                list_items = [
-                                [entry[header] for header in list_headers]
-                                 for entry in items]
-                list_items = [len(list_headers)] + list_headers + list_items
+                #list_headers = [header for header in sorted(items[0].keys())]
+                list_headers = list(fields)
+                #list_items = [
+                #                [entry[header] for header in list_headers]
+                #                 for entry in items]
+                #listoflists = [ list(mytuple) for mytuple in items ]
+                #flat_list = [item for sublist in listoflists for item in sublist]
+                list_items = [len(list_headers)] + list_headers + list(items)
+                # print(list_items[0:30])
         response = {
             'count': count,
             'results': list_items
         }
+        # print(response)
         #print('CBOR Packer returning %d/%d items, tot. length %d'
         #      % (noofitems, count, len(list_items)))
         return response
@@ -396,21 +460,23 @@ class SuperStationModuleBulkViewSet(views.APIView):
         updating = False
         print('StationModuleBulkViewSet checking for update or create.')
         # Sample first item
+        gc.collect()
         if 'pk' in request.data[0]:
             updating = True
         if updating is True:
             print('StationModuleBulkViewSet preloading modules.')
-            b1 = bool(Module.objects.all())
-            b2 = bool(Station.objects.all())
+            #b1 = bool(Module.objects.all())
+            #b2 = bool(Station.objects.all())
             try:
                 for thisdict in request.data:
                     thisdict['id'] = thisdict.pop('pk')     # Why why why ?????
-                    thisdict['module'] = Module.objects.get(pk=thisdict['module'])
-                    thisdict['station'] = Station.objects.get(pk=thisdict['station'])
+                    #thisdict['module'] = Module.objects.get(pk=thisdict['module'])
+                    #thisdict['station'] = Station.objects.get(pk=thisdict['station'])
             except Exception as exc:
-                print(exc)
+                print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
+                print(str(exc))
                 return Response(exc, status=status.HTTP_400_BAD_REQUEST)
-            retrycount = 120
+            retrycount = 20
             for thisitem in request.data:
                 while retrycount > 0:
                     try:
@@ -423,7 +489,7 @@ class SuperStationModuleBulkViewSet(views.APIView):
                         retrycount -= 1
                     except Exception as exc:
                         print("Unexpected error: %s : %s" % (sys.exc_info()[0], sys.exc_info()[1]))
-                        return HttpResponse(str(exc), status=400)
+                        return HttpResponse(str(exc), status=status.HTTP_400_BAD_REQUEST)
         else:
             try:
                 # StationModule.objects.bulk_create([StationModule(**thisdict) for thisdict in request.data])
@@ -433,7 +499,7 @@ class SuperStationModuleBulkViewSet(views.APIView):
                 query = ''' INSERT INTO edacapi_stationmodule
                             (station_id, module_id)
                             VALUES (%s,%s) '''
-                querylist = [(thisdict['station'], thisdict['module']) for
+                querylist = [(thisdict['station_id'], thisdict['module_id']) for
                             thisdict in request.data
                             ]
                 with transaction.atomic():
@@ -877,6 +943,15 @@ class BodyBulkViewSet(UpdatingBulkViewSet):
     # TODO control Bulk Deletes
 
 
+class CBORBodyView(CBORPackedItemView):
+    """
+    Optimised data dump of the Body join table.
+    """
+    queryset = Body.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
 class SolidCompositionViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Ships to be viewed or edited.
@@ -1172,7 +1247,7 @@ class StationModuleViewSet(viewsets.ModelViewSet):
 
 class StationModuleBulkViewSet(UpdatingBulkViewSet):
     """
-    API endpoint that allows Factions to be bulk viewed or edited.
+    API endpoint that allows Station Modules joins to be bulk viewed or edited.
     """
     queryset = StationModule.objects.all()
     serializer_class = StationModuleBulkSerializer
@@ -1186,5 +1261,33 @@ class CBORStationModuleView(CBORPackedItemView):
     Optimised data dump of the StationModule join table.
     """
     queryset = StationModule.objects.all()
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+
+
+class MarketListingViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows MarketListing to be viewed or edited.
+    """
+    queryset = MarketListing.objects.all()
+    serializer_class = MarketListingSerializer
+
+
+class MarketListingBulkViewSet(UpdatingBulkViewSet):
+    """
+    API endpoint that allows MarketListing joins to be bulk viewed or edited.
+    """
+    queryset = MarketListing.objects.all()
+    serializer_class = MarketListingBulkSerializer
+    renderer_classes = (CBORRenderer, )
+    parser_classes = (CBORParser, )
+    # TODO control Bulk Deletes
+
+
+class CBORMarketListingView(CBORPackedItemView):
+    """
+    Optimised data dump of the MarketListing join table.
+    """
+    queryset = MarketListing.objects.all()
     renderer_classes = (CBORRenderer, )
     parser_classes = (CBORParser, )
